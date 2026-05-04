@@ -7,8 +7,8 @@ import queue
 from pathlib import Path
 import gc
 
-from scripts.const import *
-from scripts.utils import insert_rows_copy
+from parser_scripts.const import *
+from parser_scripts.utils import insert_rows_copy
 
 def batch_insert(conn, batch, set_up, table_suffix=''):
     """Function to insert into DB in parallel."""

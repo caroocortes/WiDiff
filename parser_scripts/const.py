@@ -1,16 +1,9 @@
-from dotenv import load_dotenv
-from pathlib import Path
-import os
-
-dotenv_path = Path(__file__).resolve().parent.parent / ".env"
-load_dotenv(dotenv_path)
-
 WIKIDATA_SERVICE_URL = "https://dumps.wikimedia.org/wikidatawiki/20250601/"
 
 # --------------------------------------------------------------------------------------------------------------
 # Paths
 # --------------------------------------------------------------------------------------------------------------
-DOWNLOAD_LINKS_FILE_PATH = 'data/xml_download_links.txt'
+DOWNLOAD_LINKS_FILE_PATH = 'auxiliary_data/xml_download_links.txt'
 CLAIMED_FILES_PATH = "logs/claimed_files.txt"
 LOCK_FILE_PATH = "logs/file_claim.lock"
 PROCESSED_FILES_PATH = 'logs/processed_files.txt'
@@ -18,22 +11,22 @@ SETUP_PATH = 'setup.yml'
 PARSER_LOG_FILES_PATH = 'parser_log_files.csv'
 ERROR_REVISION_TEXT_PATH = "logs/error_revision_text.txt"
 REVISION_NO_CLAIMS_TEXT_PATH = "logs/revision_no_claims.txt"
-PROPERTY_LABELS_PATH = f'data/property_labels.csv'
-ENTITY_LABEL_ALIAS_PATH = f'data/labels_aliases.csv'
-SUBCLASS_OF_PATH = f'data/p279_entity_types.csv'
-INSTANCE_OF_PATH = f'data/p31_entity_types.csv'
+PROPERTY_LABELS_PATH = f'auxiliary_data/property_labels.csv'
+ENTITY_LABEL_ALIAS_PATH = f'auxiliary_data/labels_aliases.csv'
+SUBCLASS_OF_PATH = f'auxiliary_data/p279_entity_types.csv'
+INSTANCE_OF_PATH = f'auxiliary_data/p31_entity_types.csv'
 
-TRANSITIVE_CLOSURE_PICKLE_FILE_PATH = 'data/transitive_closures/transitive_closure_cache.pkl'
-TRANSITIVE_CLOSURE_STATS_PICKLE_FILE_PATH = 'data/transitive_closures/transitive_closure_stats.pkl'
+TRANSITIVE_CLOSURE_PICKLE_FILE_PATH = 'auxiliary_data/transitive_closures/transitive_closure_cache.pkl'
+TRANSITIVE_CLOSURE_STATS_PICKLE_FILE_PATH = 'auxiliary_data/transitive_closures/transitive_closure_stats.pkl'
 
-DATA_PATH = 'data'
+DATA_PATH = 'auxiliary_data'
 
 # --------------------------------------------------------------------------------------------------------------
 # PATH TO SUBCLASSES OF ASTRONOMICAL OBJECTS AND SCHOLARLY ARTICLES
 # It is used to identify entities of these types
 # --------------------------------------------------------------------------------------------------------------
-ASTRONOMICAL_OBJECT_TYPES_PATH = f'data/subclassof_astronomical_object.csv'
-SCHOLARLY_ARTICLE_TYPES_PATH = 'data/subclassof_scholarly_article.csv'
+ASTRONOMICAL_OBJECT_TYPES_PATH = f'auxiliary_data/subclassof_astronomical_object.csv'
+SCHOLARLY_ARTICLE_TYPES_PATH = 'auxiliary_data/subclassof_scholarly_article.csv'
 
 # --------------------------------------------------------------------------------------------------------------
 # LOG PATHS
@@ -68,10 +61,10 @@ CREATE_REFERENCE_VALUE = "CREATE_REFERENCE_VALUE"
 # CSV PATHS FOR TRANSITIVE CLOSURES
 # --------------------------------------------------------------------------------------------------------------
 CSV_PATHS = {
-    'subclass_transitive': 'data/transitive_closures/subclass_of_transitive.csv',
-    'part_of_transitive': 'data/transitive_closures/part_of_transitive.csv',
-    'has_part_transitive': 'data/transitive_closures/has_parts_transitive.csv',
-    'located_in_transitive': 'data/transitive_closures/located_in_transitive.csv',
+    'subclass_transitive': 'auxiliary_data/transitive_closures/subclass_of_transitive.csv',
+    'part_of_transitive': 'auxiliary_data/transitive_closures/part_of_transitive.csv',
+    'has_part_transitive': 'auxiliary_data/transitive_closures/has_parts_transitive.csv',
+    'located_in_transitive': 'auxiliary_data/transitive_closures/located_in_transitive.csv',
 }
 
 # ------------------------------------------------------------------------------------------------------------------------------
@@ -184,7 +177,8 @@ ENTITY_FEATURE_COLS = [
     'label_cosine_similarity', 
     'description_cosine_similarity',
 
-    'label'
+    'label', 
+    'processed'
 ]
 ENTITY_FEATURE_PK = ['revision_id', 'property_id', 'value_id', 'change_target']
 
@@ -238,7 +232,7 @@ TIME_FEATURE_COLS = [
     # for time
     'date_diff_days',
     'sign_change',
-    'change_one_to_zero', # YYYY-01-01 -> YYYY-00-00 -> I treated this as formatting
+    # 'change_one_to_zero', # YYYY-01-01 -> YYYY-00-00 -> I treated this as formatting
     'day_added',
     'day_removed',
     'month_added',

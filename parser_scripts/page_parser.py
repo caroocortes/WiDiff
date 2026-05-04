@@ -8,9 +8,9 @@ import time
 from collections import defaultdict
 import gc
 
-from scripts.feature_creation import FeatureCreation
-from scripts.utils import get_time_feature, id_to_int
-from scripts.const import *
+from parser_scripts.feature_creation import FeatureCreation
+from parser_scripts.utils import get_time_feature, id_to_int
+from parser_scripts.const import *
 
 class PageParser():
     def __init__(
@@ -2186,6 +2186,7 @@ class PageParser():
                         0.0,  # label cosine similarity
                         0.0, # description cosine similarity
                         '', # classification label column
+                        False, # processed column
                         ) 
                     )
 

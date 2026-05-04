@@ -15,10 +15,10 @@ import torch
 import re
 import io
 
-from scripts.transitive_closure_cache import TransitiveClosureCache
-from scripts.utils import query_to_df
-from scripts.const import *
-from scripts.utils import get_time_unit
+from parser_scripts.transitive_closure_cache import TransitiveClosureCache
+from parser_scripts.utils import query_to_df
+from parser_scripts.const import *
+from parser_scripts.utils import get_time_unit
 
 class FeatureCreation():
 
@@ -419,29 +419,22 @@ class FeatureCreation():
                     if change_type == 'added':
                         if part == 'year' and year1 == 0 and year2 != 0:
                             return 1
-                        # YYYY-01-01 -> YYYY-05-00:
-                        # YYYY-01-01 -> YYYY-05-10:
-                        if part == 'month' and ((month1 == 0 and month2 > 0 and day1 == 0) or (month1 == 1 and month2 > 1 and day1 == 1 and (day2 > 1 or day2 == 0))):
+
+                        if part == 'month' and (month1 == 0 and month2 > 0):
                             return 1
-                        if part == 'day' and ((day1 == 0 and day2 > 0) or (day1 == 1 and day2 > 1 and month1 == 1 and month2 > 1)):
+                        if part == 'day' and (day1 == 0 and day2 > 0):
                             return 1
                         return 0
                     elif change_type == 'removed':
 
                         if part == 'year' and year1 > 0 and year2 == 0:
                                 return 1
-
-                        # cases like: YYYY-MM-DD -> YYYY-01-01 where MM and DD !=01
-                        if (part == 'month' or part == 'day') and month1 > 1 and day1 > 1 and month2 == 1 and day2 == 1:
-                            return 1
                         # cases like YYYY-MM-00 -> YYYY-00-00 
                         if part == 'month' and month1 > 0 and month2 == 0:
-                            if not (day1 == 1 and day2 == 0) and not (day1 == 0 and day2 == 0): # if it's not a reformatting change
                                 return 1
                         # cases like YYYY-MM-DD -> YYYY-MM-00
                         if part == 'day' and day1 > 0 and day2 == 0:
-                            if not (day1 == 1 and day2 == 0): # if it's not a reformatting change
-                                return 1
+                            return 1
                         return 0
             
             except:
@@ -481,40 +474,25 @@ class FeatureCreation():
                 if year1 != year2:
                     return 1
             elif option == 'month':
-                is_reformatting = ((month1 == 1 and day1 == 1 and day2 == 0 and month2 == 0) or  \
-                                (month1 > 0 and month2 > 0 and month1 == month2 and day1 == 1 and day2 == 0) or \
-                                (month1 == 1 and month2 == 0 and day1 == 0 and day2 == 0)) and year1 == year2
-                
-                # 1. just month added
-                # 2. goes from 01-01 to MM-00 or MM-DD
-                # 3. goes from 00-00 to MM-DD
-                is_refinement = ((month1 == 0 and month2 > 0 and day2 == 0) or \
-                                (month1 == 1 and day1 == 1 and month2 > 1 and (day2 > 1 or day2 == 0)) or \
+                # goes from 00-00 to MM-00 or MM-DD
+                is_refinement = ((month1 == 0 and month2 > 0 and day2 == 0 and day1 == 0) or \
                                 (month1 == 0 and month2 > 0 and day1 == 0 and day2 > 0)) and year1 == year2
                 # goes from MM-00 (month1) to 00-00 (month2)
-                is_unrefinement = (month2 == 0 and month1 > 0) and year1 == year2
-                if month1 != month2 and not is_reformatting and not is_refinement and not is_unrefinement:
+                is_unrefinement = (month2 == 0 and month1 > 0 and day1 == 0 and day2 == 0) and year1 == year2
+                if month1 != month2 and not is_refinement and not is_unrefinement:
                     return 1
             elif option == 'day':
-                # 1. goes from 01-01 to 00-00
-                # 2. goes from XX-01 to XX-00
-                # 3. goes from 01-00 to 00-00
-                is_reformatting = ((month1 == 1 and day1 == 1 and day2 == 0 and month2 == 0) or  \
-                                (month1 > 0 and month2 > 0 and month1 == month2 and day1 == 1 and day2 == 0) or \
-                                (month1 == 1 and month2 == 0 and day1 == 0 and day2 == 0)) and year1 == year2
-                # 1. XX-00 to XX-DD with XX that can be 01/00
-                # 2. goes from 01-01 to MM-DD
-                is_refinement = ((day1 == 0 and day2 > 0) or \
-                                (day1 == 1 and day2 > 1 and month1 == 1 and month2 > 1)) and year1 == year2
-                # goes from XX-00 to XX-DD 
-                is_unrefinement = (day2 == 0 and day1 > 0) and year1 == year2
-                if day1 != day2 and not is_reformatting and not is_refinement and not is_unrefinement:
+                # MM-00 to MM-DD or 00-00 to MM-DD
+                is_refinement = ((day1 == 0 and day2 > 0 and month1 == month2) or \
+                                (day1 == 0 and day2 > 0 and month1 == 0 and month2 > 0)) and year1 == year2
+                is_unrefinement = (day2 == 0 and day1 > 0) and year1 == year2 and month1 == month2
+                if day1 != day2 and not is_refinement and not is_unrefinement:
                     return 1
             return 0
 
         features['date_diff_days'] = calc_date_diff(old_date, new_date)
         features['sign_change'] = calc_sign_change(old_value, new_value)
-        features['change_one_to_zero'] = is_placeholder_to_zero(old_date, new_date)
+        # features['change_one_to_zero'] = is_placeholder_to_zero(old_date, new_date)
         features['day_added'] = added_removed_part(old_date, new_date, part='day', option='date', change_type='added')
         features['day_removed'] = added_removed_part(old_date, new_date, part='day', option='date', change_type='removed')
         features['month_added'] = added_removed_part(old_date, new_date, part='month', option='date', change_type='added')
@@ -527,7 +505,7 @@ class FeatureCreation():
         result = (
             features['date_diff_days'],
             features['sign_change'],
-            features['change_one_to_zero'],
+            # features['change_one_to_zero'],
             features['day_added'],
             features['day_removed'],
             features['month_added'],

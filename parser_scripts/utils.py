@@ -18,7 +18,7 @@ import pandas as pd
 import os
 import psutil
 
-from scripts.const import WIKIDATA_SERVICE_URL, DOWNLOAD_LINKS_FILE_PATH
+from parser_scripts.const import WIKIDATA_SERVICE_URL, DOWNLOAD_LINKS_FILE_PATH
 
 def total_memory_usage():
     """Get total memory including all child processes in MB"""

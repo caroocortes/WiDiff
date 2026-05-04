@@ -15,10 +15,10 @@ This README is structured as follows:
 ## Project structure
 ```bash
 ├── config/           # Configuration files
-├── data/           # Auxiliary datasets needed during parsing (property_labels.csv, subclassof_astronomical_objects.csv, subclassof_scholarly_articles.csv)
-├── download/       # Script for downloading XML files + list of download links for the dump of 20250601
+├── auxiliary_data/           # Auxiliary datasets needed during parsing (property_labels.csv, subclassof_astronomical_objects.csv, subclassof_scholarly_articles.csv)
+├── download_scripts/       # Script for downloading XML files + list of download links for the dump of 20250601
 ├── logs/       # Log folder with logs of change extraction
-├── scripts/        # Core parsing classes 
+├── parser_scripts/        # Core parsing classes 
 │   ├── file_parser.py              # Processes XML files, extracts pages
 │   ├── page_parser.py              # Processes a page (all edit history for an entity)
 │   ├── utils.py                    # Auxiliary methods 
@@ -45,9 +45,9 @@ using the queries in `data/sparql_queries.txt` against [Wikidata's query service
 - Download dump files from Wikidata's dump service. The folder `download/` contains a script to download files from the list of files in `download/xml_download_links.txt`. Note that the list provided is from the dump of June 2025 which may not be available anymore, since Wikidata provides the more recent dumps ([Link to Wikidata dumps][https://dumps.wikimedia.org/wikidatawiki/]).
 The files to download are the ones called pages-meta-history (See image below).
 
-![pages-meta-history](diagrams/pages-meta-history.png)
+<img src="diagrams/pages-meta-history.png" alt="drawing" width="600"/>
 
-### Configuration (`set_up.yml`)
+### Configuration (set_up.yml)
 
 #### `database_config_path`
 Path to the database configuration file, which has to be a json file with the following structure:
@@ -64,58 +64,48 @@ Path to the database configuration file, which has to be a json file with the fo
 
 **NOTE:** The DB needs to be created beforehand. The schema is created by the pipeline.
 
----
-
 #### `change_extraction_processing`
 Controls how the change extraction pipeline runs.
 
 | Parameter | Description |
 |---|---|
-| `language` | Language code for extracting labels and descriptions (e.g., `en`) |
-| `files_in_parallel` | Number of dump files processed in parallel |
-| `pages_in_parallel` | Number of pages processed in parallel within a file |
-| `files_directory` | Path to the directory containing the Wikidata dump files (xml.bz2) |
-| `memory_consumption_monitoring` | If `true`, logs memory usage during processing |
-| `page_queue_size` | Maximum number of pages held in the queue of `file_parser.py` |
-| `db_batch_size` | Number of revisions inserted per database batch |
-| `db_max_queue_size` | Maximum number of elems held in the queue of `db_writer.py` |
-
----
+| *language* | Language code for extracting labels and descriptions (e.g., *en*) |
+| *files_in_parallel* | Number of dump files processed in parallel |
+| *pages_in_parallel* | Number of pages processed in parallel within a file |
+| *files_directory* | Path to the directory containing the Wikidata dump files (xml.bz2) |
+| *memory_consumption_monitoring* | If *true*, logs memory usage during processing |
+| *page_queue_size* | Maximum number of pages held in the queue of *file_parser.py* |
+| *db_batch_size* | Number of revisions inserted per database batch |
+| *db_max_queue_size* | Maximum number of elems held in the queue of *db_writer.py* |
 
 #### `change_extraction_filters`
 Controls which entity types are extracted and processed. Each filter has the following fields:
 
 | Field | Description |
 |---|---|
-| `extract` | If `true`, changes for this entity type are extracted |
-| `feature_extraction` | If `true`, ML features for change classification are computed for this entity type |
-| `datatype_metadata_extraction` | If `true`, datatype metadata changes are extracted |
+| *extract* | If *true*, changes for this entity type are extracted |
+| *feature_extraction* | If *true*, ML features for change classification are computed for this entity type |
+| *datatype_metadata_extraction* | If *true*, datatype metadata changes are extracted |
 
 Available filters:
 
-- **`scholarly_articles_filter`**: Entities classified as scholarly articles (Q13442814)
-- **`astronomical_objects_filter`**: Entities classified as astronomical objects (Q6999)
-- **`less_filter`**: Entities with fewer than `threshold` changes — used to exclude low-activity entities. `threshold` can be set in `set_up.yml`
-- **`rest`**: All remaining entities not matched by the above filters. This entities are extracted by default.
-
----
+- **scholarly_articles_filter**: Entities classified as scholarly articles (Q13442814)
+- **astronomical_objects_filter**: Entities classified as astronomical objects (Q6999)
+- **less_filter**: Entities with fewer than *threshold* changes — used to exclude low-activity entities. *threshold* can be set in *set_up.yml*
+- **rest`**: All remaining entities not matched by the above filters. This entities are extracted by default.
 
 #### `reverted_edit_tagging`
 Controls revert edit tagging during change extraction.
 
 | Parameter | Description |
 |---|---|
-| `time_threshold_seconds` | Maximum time window (in seconds) within which an edit can be considered reverted. Default is `2419200` (4 weeks) |
-
----
+| time_threshold_seconds | Maximum time window (in seconds) within which an edit can be considered reverted. Default is *2419200* (4 weeks) |
 
 #### `re_interpretation`
-If `true`, performsn the re-interpretation step, tagging soft deletions, soft insertions, value updates (for updates between values of different datatypes).
-
----
+If *true*, performs the re-interpretation step, tagging soft deletions, soft insertions, value updates (for updates between values of different datatypes).
 
 #### `update_entity_labels_descriptions`
-If `true`, updates entity labels and descriptions the table `features_entity{suffix}`
+If *true*, updates entity labels and descriptions the table *features_entity{suffix}*
 
 ## Running WiDiff
 
@@ -280,6 +270,8 @@ bash extract_extra_data.bash
 The database is organized into two groups of tables: **change tables**, which store the extracted changes, and **feature tables**, which store the features computed for change classification.
 
 Given the amount of data on Wikidata, the most tables contain "redundant data" for query performance or to simplify aggregations (e.g., tables with a timestamp column contain columns with the week, year_moth and year of the timestamp for aggregations on different time levels).
+
+![database schema diagram](diagrams/database_schema_diagram.png)
 
 ### Change Tables
 
@@ -475,10 +467,13 @@ Given the amount of data on Wikidata, the most tables contain "redundant data" f
 | total_feature_creation_sec | Total time for feature creation in secons |
 | num_feature_creations_timed | Number of feature creations calls for which the time was measured |
 
-![database schema diagram](diagrams/database_schema_diagram.png)
+### Feature Tables for Change Classification
+One feature table per datatype: `features_text`, `features_quantity`, `features_time`, `features_entity`, `features_globecoordinate`. 
+Each table stores the features computed for change classification, referencing the corresponding row in `value_change`. 
+Features are datatype-specific.
+For globecoordinate, features are calculated separately for latitude and longitude.
 
-### Feature Tables
-One feature table per datatype: `features_text`, `features_quantity`, `features_time`, `features_entity`, `features_globecoordinate`. Each table stores the features computed for change classification, referencing the corresponding row in `value_change`. Features are datatype-specific.
+The implementation of features can be found in *parser_scripts/feature_creation.py*.
 
 **`features_time`**
 | Column | Description |
@@ -496,7 +491,6 @@ One feature table per datatype: `features_text`, `features_quantity`, `features_
 | action | Indicates the action performed: CREATE, UPDATE or DELETE |
 | date_diff_days | Difference between old_value and new_value in days |
 | sign_change | 1 if there's a sign change, 0 otherwise |
-| change_one_to_zero | 1 if there's any of these cases happen: YYYY-01-01 -> YYYY-00-00, YYYY-MM-01 -> YYYY-MM-00, YYYY-01-00 -> YYYY-00-00; 0 otherwise|
 | day_added | 1 if the day was added, 0 otherwise |
 | day_removed | 1 if the day was removed, 0 otherwise |
 | month_added | 1 if the day was added, 0 otherwise |
@@ -660,7 +654,7 @@ Set the following parameters in `set_up.yml` under `transitive_closure_cache`:
 To create the cache, run:
 
 ```bash
-from scripts.transitive_closure_cache import TransitiveClosure
+from parser_scripts.transitive_closure_cache import TransitiveClosure
 cache = TransitiveClosure()
 ```
 
@@ -682,7 +676,7 @@ For embedding-based features for entity changes, the labels and descriptions of 
 To compute the remaining features, run from root:
 
 ```bash
-python3 -m scripts.compute_remaining_features --table_suffix rest
+python3 -m parser_scripts.compute_remaining_features --table_suffix rest
 ```
 
 This script reads from the `features_text` and `features_entity` tables in the database and writes the computed values back. It must be run after change extraction with `feature_extraction: true` and before running the ML classifier.

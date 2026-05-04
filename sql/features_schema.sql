@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS features_time{suffix} (
     -- for time
     date_diff_days BIGINT,
     sign_change INT, -- 0 or 1
-    change_one_to_zero INT,
+    -- change_one_to_zero INT,
     day_added INT,
     day_removed INT,
     month_added INT,
@@ -210,6 +210,7 @@ CREATE TABLE IF NOT EXISTS features_entity{suffix} (
     -- old_value_is_metaclass_for_new_value INT,
 
     label VARCHAR(255),
+    processed BOOLEAN,
     PRIMARY KEY (revision_id, property_id, value_id, change_target),
     FOREIGN KEY (revision_id, property_id, value_id, change_target) REFERENCES value_change{suffix}(revision_id, property_id, value_id, change_target)
 );

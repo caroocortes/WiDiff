@@ -5,7 +5,7 @@ from pathlib import Path
 import yaml
 import pickle
 
-from scripts.const import SETUP_PATH
+from parser_scripts.const import SETUP_PATH
 
 class TransitiveClosureCache:
     def __init__(self):

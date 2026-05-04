@@ -3,5 +3,5 @@
     "DB_PASS": "postgres",
     "DB_NAME": "wikidata_changes_new",
     "DB_PORT": 5433,
-    "DB_HOST": "10.130.31.30"
+    "DB_HOST": "10.130.31.24"
 }

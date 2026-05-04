@@ -14,10 +14,10 @@ import csv
 import threading
 import gc
 
-from scripts.page_parser import PageParser
-from scripts.const import *
-from scripts.db_writer import batch_insert
-from scripts.utils import print_exception_details
+from parser_scripts.page_parser import PageParser
+from parser_scripts.const import *
+from parser_scripts.db_writer import batch_insert
+from parser_scripts.utils import print_exception_details
 
 def process_page_xml(page_elem_str, file_path, set_up, property_labels, astronomical_object_types, scholarly_article_types):
 
