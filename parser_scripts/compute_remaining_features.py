@@ -44,7 +44,8 @@ if __name__ == "__main__":
         feature_creator = FeatureCreation(conn=conn)
 
         max_batches = None
-        datatypes = ['entity', 'text']
+        # datatypes = ['entity', 'text']
+        datatypes = ['entity']
         
         for datatype in datatypes:
 
@@ -56,10 +57,10 @@ if __name__ == "__main__":
                 with open(script_dir.parent / Path(SETUP_PATH), 'w') as f:
                     yaml.dump(set_up, f)
 
-            # start = time.time()
-            # feature_creator.create_remaining_features(datatype, table_suffix, max_batches=max_batches)
-            # end_time = time.time()
-            # print(f"Total time taken for creating remaining features for {datatype} table: {end_time - start} seconds")
+            start = time.time()
+            feature_creator.create_remaining_features(datatype, table_suffix, max_batches=max_batches)
+            end_time = time.time()
+            print(f"Total time taken for creating remaining features for {datatype} table: {end_time - start} seconds")
         
         conn.close()
     except Exception as e:

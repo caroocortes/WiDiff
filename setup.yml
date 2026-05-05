@@ -46,10 +46,10 @@ re_interpretation: true
 reverted_edit_tagging:
   time_threshold_seconds: 2419200
 transitive_closure_cache:
-  has_part_transitive_path: /sc/home/carolina.cortes/wikidata-edit-history/data/transitive_closures/has_parts_transitive.csv
-  located_in_transitive_path: /sc/home/carolina.cortes/wikidata-edit-history/data/transitive_closures/located_in_transitive.csv
-  part_of_transitive_path: /sc/home/carolina.cortes/wikidata-edit-history/data/transitive_closure/part_of_transitive.csv
-  subclass_transitive_path: /sc/home/carolina.cortes/wikidata-edit-history/data/transitive_closure/subclass_of_transitive.csv
-  transitive_closure_pickle_file_path: /sc/home/carolina.cortes/wikidata-edit-history/data/transitive_closures/transitive_closure_cache.pkl
-  transitive_closure_stats_pickle_file_path: /sc/home/carolina.cortes/wikidata-edit-history/data/transitive_closures/transitive_closure_stats.pkl
+  has_part_transitive_path: /sc/home/carolina.cortes/wikidata-edit-history/auxiliary_data/transitive_closures/has_parts_transitive.csv
+  located_in_transitive_path: /sc/home/carolina.cortes/wikidata-edit-history/auxiliary_data/transitive_closures/located_in_transitive.csv
+  part_of_transitive_path: /sc/home/carolina.cortes/wikidata-edit-history/auxiliary_data/transitive_closures/part_of_transitive.csv
+  subclass_transitive_path: /sc/home/carolina.cortes/wikidata-edit-history/auxiliary_data/transitive_closures/subclass_of_transitive.csv
+  transitive_closure_pickle_file_path: /sc/home/carolina.cortes/wikidata-edit-history/auxiliary_data/transitive_closures/transitive_closure_cache.pkl
+  transitive_closure_stats_pickle_file_path: /sc/home/carolina.cortes/wikidata-edit-history/auxiliary_data/transitive_closures/transitive_closure_stats.pkl
 update_entity_labels_descriptions: false

@@ -11,3 +11,4 @@ logs/*
 !logs/parser_log_files.csv
 !logs/metrics.ipynb
 slurm_wrapper.slurm
+/auxiliary_data/transitive_closures/*

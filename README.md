@@ -267,11 +267,22 @@ bash extract_extra_data.bash
 ```
 
 ## Database schema
-The database is organized into two groups of tables: **change tables**, which store the extracted changes, and **feature tables**, which store the features computed for change classification.
+The database is organized into two groups of tables: **change tables**, which store the extracted changes, and **feature tables**, which store the features computed for change classification. Additionally, we also provide **entity_stats** tables which contain statistics (e.g., number of revisions, number or rank changes, etc.) per entity.
 
 Given the amount of data on Wikidata, the most tables contain "redundant data" for query performance or to simplify aggregations (e.g., tables with a timestamp column contain columns with the week, year_moth and year of the timestamp for aggregations on different time levels).
 
+In the following we provide a reduced database schema diagram of the change tables. We removed all redundant columns added for query optimization purposes (e.g., timestamp in *value_change* table).
+
 ![database schema diagram](diagrams/database_schema_diagram.png)
+
+### Datatype groupings
+Since Wikidata defines 18 datatypes, some of which can have added "metadata" (e.g., a value of datatype quantity is accompanied by a unit, lower and upper bound), we group Wikidata's datatypes by their underlying JSON representation. For example, Wikidata's quantity datatype maps directly to a JSON quantity type, while geo-shape is represented as a JSON string. Therefore, we end up with the following datatypes: string, quantity, time, entity, globecoordinate.
+We also include a new "datatype" named "unknown-values" for the values "somevalue" and "novalue".
+
+In the following we show the groupings for "string" and "entity":
+STRING_TYPES = ['monolingualtext', 'string', 'external-id', 'url', 'commonsMedia', 'geo-shape', 'tabular-data', 'math', 'musical-notation', 'unknown-values']
+
+ENTITY_TYPES = ['wikibase-item', 'wikibase-entityid', 'wikibase-property', 'wikibase-lexeme', 'wikibase-sense', 'wikibase-form', 'entity-schema']
 
 ### Change Tables
 
@@ -713,4 +724,4 @@ Output figures are saved to `analysis/results/figures/`.
 
 We provide datasets to run this analysis ([WiDiff: Analysis Results from Wikidata Edit History Dump (June 2025)](https://doi.org/10.5281/zenodo.19771569)). Download the *widiff_analysis_results_20250601.zip* and put the .csv files in the folder `analysis/results/`.
 
-**Note:** On first run, set `reload_data: true` to execute the SQL queries and store the results. Subsequent runs can use `reload_data: false` to load from the stored results.
+**Note:** Set `reload_data: true` (if you want to obtain fresh results and not use the ones provided in [WiDiff: Analysis Results from Wikidata Edit History Dump (June 2025)](https://doi.org/10.5281/zenodo.19771569)) to execute the SQL queries and store the results. Subsequent runs can use `reload_data: false` to load from the stored results.

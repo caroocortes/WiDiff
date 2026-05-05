@@ -28,6 +28,8 @@ class TransitiveClosureCache:
 
         stats_pickle_path = Path(transitive_closure_stats_pickle_file_path)
 
+        print(f"Looking for pickle at: {transitive_closure_pickle_file_path.resolve()}", flush=True)
+
         if transitive_closure_pickle_file_path.exists() and stats_pickle_path.exists():
             print(f"Loading transitive closure cache from {transitive_closure_pickle_file_path}", flush=True)
             start_time = time.time()

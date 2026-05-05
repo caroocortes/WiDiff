@@ -1051,10 +1051,10 @@ class FeatureCreation():
                         # v3 -> {} # deleted
                         # {} -> v1 # create
                         if ('restore' in future_change['comment'] or 'rollback' in future_change['comment']) and \
-                            current_change['action'] == 'UPDATE' and \
-                            future_change['action'] == 'CREATE':
+                            ((current_change['action'] == 'UPDATE' and future_change['action'] == 'CREATE') or \
+                                (current_change['action'] == 'UPDATE' and future_change['action'] == 'UPDATE')):
 
-                                for inter_change in next_changes[:j]:
+                                for inter_change in next_changes[:j]: # go up to future_change, but not including it
                                     
                                     inter_key = (inter_change['revision_id'], property_id, value_id, inter_change['change_target'])
                                     reverted_keys.add(inter_key)
@@ -1353,7 +1353,7 @@ class FeatureCreation():
         key_cols = ['revision_id', 'property_id', 'value_id', 'change_target']
         key_cols_str = ', '.join(key_cols)
 
-        batch_size = 100000
+        batch_size = 1000000
         num_batches = 0
 
         cursor = self.conn.cursor()
