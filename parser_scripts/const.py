@@ -348,7 +348,8 @@ TEXT_FEATURE_COLS = [
 
     'value_cosine_similarity',
 
-    'label'
+    'label',
+    'processed'
 ]
 TEXT_FEATURE_PK = ['revision_id', 'property_id', 'value_id', 'change_target']
 

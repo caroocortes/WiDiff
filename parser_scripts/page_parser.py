@@ -2201,6 +2201,7 @@ class PageParser():
                         self.entity_data['label'],
                         0.0, # value cosine similarity
                         '', # # classification label column
+                        False, # processed column
                         )
                     )
 

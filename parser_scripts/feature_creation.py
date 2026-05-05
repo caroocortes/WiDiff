@@ -1182,7 +1182,7 @@ class FeatureCreation():
     ####################################################################################################
     # Update of features that weren't calculated during parsinf of the file
     ####################################################################################################
-    def create_and_update_embedding_features(self, datatype, key_cols, select_cols, embedding_cols, table_prefix, batch_size=100000, max_batches=None):
+    def create_and_update_embedding_features(self, datatype, key_cols, select_cols, embedding_cols, table_prefix, batch_size=1000000, max_batches=None):
         """
         Creates and updates embedding features for the given datatype. Processes in batches.
         

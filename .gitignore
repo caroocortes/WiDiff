@@ -7,4 +7,7 @@ scripts/__pycache__/*
 .env
 .DS_STORE
 logs/*
+!logs/experiment_results.csv
+!logs/parser_log_files.csv
+!logs/metrics.ipynb
 slurm_wrapper.slurm
