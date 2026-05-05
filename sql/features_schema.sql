@@ -155,6 +155,7 @@ CREATE TABLE IF NOT EXISTS features_text{suffix} (
     value_cosine_similarity FLOAT,
 
     label VARCHAR(255),
+    processed BOOLEAN,
     PRIMARY KEY (revision_id, property_id, value_id, change_target),
     FOREIGN KEY (revision_id, property_id, value_id, change_target) REFERENCES value_change{suffix}(revision_id, property_id, value_id, change_target)
 );
