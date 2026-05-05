@@ -338,6 +338,7 @@ ENTITY_TYPES = ['wikibase-item', 'wikibase-entityid', 'wikibase-property', 'wiki
 | entity_label | Entity label. Extracted as the last one. |
     
 *Primary key:* (revision_id, property_id, value_id, change_target)
+
 *Foreign key:* (revision_id) references revision(revision_id).
 
 **`qualifier_change`** — stores additions and deletions of qualifier values. Since qualifiers lack unique identifiers, only CREATE and DELETE actions are tracked (no UPDATE). Values are identified by a hash of their content.
@@ -369,7 +370,9 @@ ENTITY_TYPES = ['wikibase-item', 'wikibase-entityid', 'wikibase-property', 'wiki
 | entity_label | Entity label. Extracted as the last one. |
 
 *Primary key:* (revision_id, property_id, value_id, qual_property_id, value_hash, change_target)
+
 *Foreign key:* (revision_id) references revision(revision_id).
+
 *Note:* (revision_id, property_id, value_id, change_target) does not necessarily exist in value_change since a revision could involve only qualifier changes
 
 **`reference_change`** — stores additions and deletions of reference values, following the same approach as `qualifier_change`. Each row is additionally identified by a reference hash (`ref_hash`), which identifies the reference group the value belongs to.
@@ -402,7 +405,9 @@ ENTITY_TYPES = ['wikibase-item', 'wikibase-entityid', 'wikibase-property', 'wiki
 | entity_label | Entity label. Extracted as the last one. |
 
 *Primary key:* (revision_id, property_id, value_id, ref_hash, ref_property_id, value_hash, change_target)
+
 *Foreign key:* (revision_id) references revision(revision_id).
+
 *Note:* (revision_id, property_id, value_id, change_target) does not necessarily exist in value_change since a revision could involve only reference changes
 
 **`datatype_metadata_change`** — stores changes to datatype-specific metadata fields (e.g., `upperBound` for quantity values). These are tracked separately from the main value change.
@@ -435,6 +440,7 @@ ENTITY_TYPES = ['wikibase-item', 'wikibase-entityid', 'wikibase-property', 'wiki
 | entity_label | Entity label. Extracted as the last one. |
 
 *Primary key:* (revision_id, property_id, value_id, change_target)
+
 *Foreign key:* (revision_id) references revision(revision_id).
 
 **`entity_stats`** — one row per entity, aggregating counts of all change types, user types, reverted edits, and processing times. Useful for entity-level analysis without querying the full change tables.
@@ -512,6 +518,7 @@ The implementation of features can be found in *parser_scripts/feature_creation.
 | label | Change classification label. Can be: *re_formatting*, *property_value_update*, *refinement* or *unrefinement* |
 
 *Primary key:* (revision_id, property_id, value_id, change_target)
+
 *Foreign key:* (revision_id, property_id, value_id, change_target) references value_change(revision_id, property_id, value_id, change_target)
 
 **`features_quantity`**
@@ -539,6 +546,7 @@ The implementation of features can be found in *parser_scripts/feature_creation.
 | label | Change classification label. Can be: *re_formatting*, *property_value_update*, *refinement* or *unrefinement* |
 
 *Primary key:* (revision_id, property_id, value_id, change_target)
+
 *Foreign key:* (revision_id, property_id, value_id, change_target) references value_change(revision_id, property_id, value_id, change_target)
 
 **`features_globecoordinate`**
@@ -575,6 +583,7 @@ The implementation of features can be found in *parser_scripts/feature_creation.
 | label_longitude | Change classification label. Can be: *re_formatting*, *property_value_update*, *refinement* or *unrefinement* |
 
 *Primary key:* (revision_id, property_id, value_id, change_target)
+
 *Foreign key:* (revision_id, property_id, value_id, change_target) references value_change(revision_id, property_id, value_id, change_target)
 
 **`features_text`**
@@ -612,6 +621,7 @@ The implementation of features can be found in *parser_scripts/feature_creation.
 | label | Change classification label. Can be: *re_formatting*, *textual_change*, *property_value_update*, *refinement* or *unrefinement* |
 
 *Primary key:* (revision_id, property_id, value_id, change_target)
+
 *Foreign key:* (revision_id, property_id, value_id, change_target) references value_change(revision_id, property_id, value_id, change_target)
 
 **`features_entity`**
@@ -647,6 +657,7 @@ The implementation of features can be found in *parser_scripts/feature_creation.
 | label | Change classification label. Can be: *re_formatting*, *link_change*, *property_value_update*, *refinement* or *unrefinement* |
 
 *Primary key:* (revision_id, property_id, value_id, change_target)
+
 *Foreign key:* (revision_id, property_id, value_id, change_target) references value_change(revision_id, property_id, value_id, change_target)
 
 **Note:** All table names include a `{suffix}` placeholder, which is replaced at runtime for the different filters of entity types in `set_up.yml`. The values for this suffix can be: `_sa` (scholarly articles), `_ao` (astronomical objects), `_less` (entities with less than *threshold* value changes)
