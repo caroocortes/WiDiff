@@ -33,6 +33,8 @@ This README is structured as follows:
 
 ## Change Extraction
 
+*Please read the instructions carefully since there are parameters to be set (in set_up.yml) for running the extraction pipeline.*
+
 ### Prerequisites
 
 - Python 3.11.9
@@ -62,7 +64,7 @@ Path to the database configuration file, which has to be a json file with the fo
 }
 ```
 
-**NOTE:** The DB needs to be created beforehand. The schema is created by the pipeline.
+**NOTE: The DB needs to be created beforehand and the adequate credentials (username, user password, database name, hostname and port) need to be set on *the config/db_config.json* file. The schema is created by the pipeline.**
 
 #### `change_extraction_processing`
 Controls how the change extraction pipeline runs.
@@ -77,6 +79,8 @@ Controls how the change extraction pipeline runs.
 | *page_queue_size* | Maximum number of pages held in the queue of *file_parser.py* |
 | *db_batch_size* | Number of revisions inserted per database batch |
 | *db_max_queue_size* | Maximum number of elems held in the queue of *db_writer.py* |
+
+**NOTE: Provide the correct path to the directory storing the dump files (xml.bz2 format) in *files_directory***
 
 #### `change_extraction_filters`
 Controls which entity types are extracted and processed. Each filter has the following fields:
@@ -272,6 +276,8 @@ The database is organized into two groups of tables: **change tables**, which st
 Given the amount of data on Wikidata, the most tables contain "redundant data" for query performance or to simplify aggregations (e.g., tables with a timestamp column contain columns with the week, year_moth and year of the timestamp for aggregations on different time levels).
 
 In the following we provide a reduced database schema diagram of the change tables. We removed all redundant columns added for query optimization purposes (e.g., timestamp in *value_change* table).
+
+The full schema for the tables can be found in *sql/change_schema.sql*, *sql/features_schema.sql*, *sql/datatype_metadata_schema.sql*. 
 
 ![database schema diagram](diagrams/database_schema_diagram.png)
 
@@ -654,7 +660,7 @@ The implementation of features can be found in *parser_scripts/feature_creation.
 ## Transitive Closure Cache Creation
 The transitive closure cache is required for ML-based change classification. It loads the transitive closure CSV files produced by `ExtractTransitiveClosure.java` into memory and serializes them as a pickle file for fast access during feature computation.
 
-Set the following parameters in `set_up.yml` under `transitive_closure_cache`:
+**Set the following parameters in `set_up.yml` under `transitive_closure_cache`:**
 - *subclass_transitive_path:* path to the .csv file with the transitive closures for subclass of
 - *part_of_transitive_path:* path to the .csv file with the transitive closures for part of
 - *has_part_transitive_path:* path to the .csv file with the transitive closures for has parts

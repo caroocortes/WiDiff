@@ -11,10 +11,10 @@ import multiprocessing as mp
 import gc
 import yaml
 
-from scripts.db_writer import db_writer
-from scripts.utils import create_db_schema
-from scripts.file_parser import FileParser
-from scripts.const import PROCESSED_FILES_PATH, CLAIMED_FILES_PATH, LOCK_FILE_PATH, SETUP_PATH
+from parser_scripts.db_writer import db_writer
+from parser_scripts.utils import create_db_schema
+from parser_scripts.file_parser import FileParser
+from parser_scripts.const import PROCESSED_FILES_PATH, CLAIMED_FILES_PATH, LOCK_FILE_PATH, SETUP_PATH
 
 with open(SETUP_PATH, 'r') as f:
     set_up = yaml.safe_load(f)

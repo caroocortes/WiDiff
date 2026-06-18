@@ -1,0 +1,40 @@
+@prefix void: <http://rdfs.org/ns/void#> .
+@prefix dcat: <http://www.w3.org/ns/dcat#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+@prefix schema: <http://schema.org/> .
+
+
+<https://huggingface.co/datasets/caroocortes/wikidata-changes>
+    a void:Dataset, dcat:Dataset ;
+    dcterms:title "Wikidata Changes Database Dump"@en ;
+    dcterms:description "A relational dataset capturing the full edit history of 31+ million Wikidata entities, including value changes, qualifier changes, and reference changes; extracted using WiDiff"@en ;
+    dcterms:license <https://creativecommons.org/licenses/by/4.0/> ;
+    
+    # Subsets per table
+    void:subset <https://huggingface.co/datasets/caroocortes/wikidata-changes/revision> ;
+    void:subset <https://huggingface.co/datasets/caroocortes/wikidata-changes/value_change> ;
+    void:subset <https://huggingface.co/datasets/caroocortes/wikidata-changes/qualifier_change> ;
+    void:subset <https://huggingface.co/datasets/caroocortes/wikidata-changes/reference_change> .
+
+<https://huggingface.co/datasets/caroocortes/wikidata-changes/revision>
+    a void:Dataset ;
+    dcterms:title "Revision"@en ;
+    dcterms:description "One row per revision. Stores metadata about each edit made to a Wikidata entity, including the editor, timestamp, user type, and redirect information."@en.
+
+<https://huggingface.co/datasets/caroocortes/wikidata-changes/value_change>
+    a void:Dataset ;
+    dcterms:title "Value Change"@en ;
+    dcterms:description "Stores changes to statement values, including creations, deletions, and updates. Each row records old and new values, the action performed. The change_target field distinguishes main value changes from rank or language code changes (the latter one for multilingualtext values)."@en .
+
+<https://huggingface.co/datasets/caroocortes/wikidata-changes/qualifier_change>
+    a void:Dataset ;
+    dcterms:title "Qualifier Change"@en ;
+    dcterms:description "Stores additions and deletions of qualifier values. Since qualifiers lack unique identifiers, only CREATE and DELETE actions are tracked. Values are identified by a hash of their content."@en ;
+
+<https://huggingface.co/datasets/caroocortes/wikidata-changes/reference_change>
+    a void:Dataset ;
+    dcterms:title "Reference Change"@en ;
+    dcterms:description "Stores additions and deletions of reference values. Each row is identified by a reference hash (ref_hash), which identifies the reference group the value belongs to. A reference is composed of multiple property-value pairs."@en ;
+
