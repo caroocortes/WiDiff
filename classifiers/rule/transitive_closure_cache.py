@@ -11,7 +11,7 @@ class TransitiveClosureCache:
     def __init__(self):
 
         script_dir = Path(__file__).parent
-        with open(script_dir.parent / Path(SETUP_PATH), 'r') as f:
+        with open(script_dir.parent.parent / Path(SETUP_PATH), 'r') as f:
             set_up = yaml.safe_load(f)
 
         csv_paths = {

@@ -4,6 +4,7 @@ WIKIDATA_SERVICE_URL = "https://dumps.wikimedia.org/wikidatawiki/20250601/"
 # Paths
 # --------------------------------------------------------------------------------------------------------------
 DOWNLOAD_LINKS_FILE_PATH = 'auxiliary_data/xml_download_links.txt'
+LOGS_DIR = 'logs'
 CLAIMED_FILES_PATH = "logs/claimed_files.txt"
 LOCK_FILE_PATH = "logs/file_claim.lock"
 PROCESSED_FILES_PATH = 'logs/processed_files.txt'
@@ -37,25 +38,25 @@ LESS20_STATS_FILE_PATH = 'logs/stats/less20_stats.csv'
 STATS_FILE_PATH = 'logs/stats/stats.csv'
 
 # --------------------------------------------------------------------------------------------------------------
+# NAMESPACES
+# --------------------------------------------------------------------------------------------------------------
+WD = "http://www.wikidata.org/entity/"
+WD_PROP = "http://www.wikidata.org/prop/"
+WD_STATEMENT = "http://www.wikidata.org/entity/statement/"
+NS = "https://example.org/schema#"
+
+# --------------------------------------------------------------------------------------------------------------
 # CHANGE TYPES
 # --------------------------------------------------------------------------------------------------------------
-
-# CREATE_PROPERTY = "CREATE_PROPERTY"
-CREATE_PROPERTY_VALUE = "CREATE_PROPERTY_VALUE"
-# CREATE_ENTITY = "CREATE_ENTITY"
-UPDATE_PROPERTY_VALUE = "UPDATE_PROPERTY_VALUE"
-UPDATE_PROPERTY_DATATYPE_METADATA = "UPDATE_PROPERTY_DATATYPE_METADATA"
-# DELETE_PROPERTY = "DELETE_PROPERTY"
-DELETE_PROPERTY_VALUE = "DELETE_PROPERTY_VALUE"
-UPDATE_RANK = "UPDATE_RANK"
-# CREATE_QUALIFIER = "CREATE_QUALIFIER"
-# DELETE_QUALIFIER = "DELETE_QUALIFIER"
-CREATE_QUALIFIER_VALUE = "CREATE_QUALIFIER_VALUE"
-DELETE_QUALIFIER_VALUE = "DELETE_QUALIFIER_VALUE"
-# CREATE_REFERENCE = "CREATE_REFERENCE"
-# DELETE_REFERENCE = "DELETE_REFERENCE"
-DELETE_REFERENCE_VALUE = "DELETE_REFERENCE_VALUE"
-CREATE_REFERENCE_VALUE = "CREATE_REFERENCE_VALUE"
+CREATE_PROPERTY_VALUE = "CREATE"
+UPDATE_PROPERTY_VALUE = "UPDATE"
+DELETE_PROPERTY_VALUE = "DELETE"
+UPDATE_PROPERTY_DATATYPE_METADATA = "UPDATE"
+UPDATE_RANK = "UPDATE"
+CREATE_QUALIFIER_VALUE = "CREATE"
+DELETE_QUALIFIER_VALUE = "DELETE"
+DELETE_REFERENCE_VALUE = "DELETE"
+CREATE_REFERENCE_VALUE = "CREATE"
 
 # --------------------------------------------------------------------------------------------------------------
 # CSV PATHS FOR TRANSITIVE CLOSURES
@@ -87,311 +88,180 @@ BATCH_SIZE = 5000
 NO_VALUE = 'novalue'
 SOME_VALUE = 'somevalue'
 
+STOP_WORDS = {'a', 'about', 'above', 'after', 'again', 'against', 'ain', 'all', 'am', 'an', 'and', 'any', 'are', 'aren', "aren't", 'as', 'at', 'be', 'because', 'been', 'before', 'being', 'below', 'between', 'both', 'but', 'by', 'can', 'couldn', "couldn't", 'd', 'did', 'didn', "didn't", 'do', 'does', 'doesn', "doesn't", 'doing', 'don', "don't", 'down', 'during', 'each', 'few', 'for', 'from', 'further', 'had', 'hadn', "hadn't", 'has', 'hasn', "hasn't", 'have', 'haven', "haven't", 'having', 'he', "he'd", "he'll", "he's", 'her', 'here', 'hers', 'herself', 'him', 'himself', 'his', 'how', 'i', "i'd", "i'll", "i'm", "i've", 'if', 'in', 'into', 'is', 'isn', "isn't", 'it', "it'd", "it'll", "it's", 'its', 'itself', 'just', 'll', 'm', 'ma', 'me', 'mightn', "mightn't", 'more', 'most', 'mustn', "mustn't", 'my', 'myself', 'needn', "needn't", 'no', 'nor', 'not', 'now', 'o', 'of', 'off', 'on', 'once', 'only', 'or', 'other', 'our', 'ours', 'ourselves', 'out', 'over', 'own', 're', 's', 'same', 'shan', "shan't", 'she', "she'd", "she'll", "she's", 'should', "should've", 'shouldn', "shouldn't", 'so', 'some', 'such', 't', 'than', 'that', "that'll", 'the', 'their', 'theirs', 'them', 'themselves', 'then', 'there', 'these', 'they', "they'd", "they'll", "they're", "they've", 'this', 'those', 'through', 'to', 'too', 'under', 'until', 'up', 've', 'very', 'was', 'wasn', "wasn't", 'we', "we'd", "we'll", "we're", "we've", 'were', 'weren', "weren't", 'what', 'when', 'where', 'which', 'while', 'who', 'whom', 'why', 'will', 'with', 'won', "won't", 'wouldn', "wouldn't", 'y', 'you',"you'd", "you'll", "you're", "you've", 'your', 'yours', 'yourself', 'yourselves'}
 
 # ------------------------------------------------------------------------------------------------------------------------------
 # Wikidata's XML namespace
 # ------------------------------------------------------------------------------------------------------------------------------
 NS = "http://www.mediawiki.org/xml/export-0.11/"
 
+WIKIDATA_SANDBOXES = ['Q4115189', 'Q13406268', 'Q15397819', 'Q112795079', 'Q16943273', 'Q17339402']
+
 # ------------------------------------------------------------------------------------------------------------------------------
 # Wikidata's datatypes
 # ------------------------------------------------------------------------------------------------------------------------------
-WD_STRING_TYPES = ['monolingualtext', 'string', 'external-id', 'url', 'commonsMedia', 'geo-shape', 'tabular-data', 'math', 'musical-notation', 'unknown-values']
+WD_STRING_TYPES = ['string', 'external-id', 'url', 'commonsMedia', 'geo-shape', 'tabular-data', 'math', 'musical-notation']
 WD_ENTITY_TYPES = ['wikibase-item', 'wikibase-entityid', 'wikibase-property', 'wikibase-lexeme', 'wikibase-sense', 'wikibase-form', 'entity-schema']
 
+ALL_DATATYPES = WD_STRING_TYPES + WD_ENTITY_TYPES + ['monolingualtext', 'globecoordinate', 'quantity', 'time', 'bad', 'unknown-values']
 
 # ------------------------------------------------------------------------------------------------------------------------------
 # TABLE COLUMNS
 # ------------------------------------------------------------------------------------------------------------------------------
-REVISION_COLS = ['prev_revision_id', 'revision_id', 'entity_id', 'timestamp', 'week', 
-                 'year_month', 'year', 'user_id', 'username', 'user_type', 'comment', 
-                 'file_path', 'redirect', 'q_id_redirect', 'entity_label']
+REVISION_COLS = ['prev_revision_id', 'revision_id', 'entity_id', 'timestamp', 'user_id', 
+                 'username', 'user_type', 'comment', 'file_id', 'q_id_redirect']
 REVISION_PK = ['revision_id']
 
-VALUE_CHANGE_COLS = ['revision_id', 'property_id', 'property_label', 'value_id', 'old_value', 
-                     'new_value', 'old_datatype', 'new_datatype', 'change_target', 
-                     'action', 'target', 'old_hash', 'new_hash', 'timestamp', 'week', 'year_month', 
-                     'year', 'label', 'entity_id', 'is_reverted', 'reversion', 'reversion_timestamp', 'revision_id_reversion', 'entity_label']
-VALUE_CHANGE_PK = ['revision_id', 'property_id', 'value_id', 'change_target']
+VALUE_CHANGE_COLS = ['revision_id', 'property_id', 'value_id', 'old_value', 
+                     'new_value', 'old_datatype', 'new_datatype', 
+                     'action', 'timestamp', 'label', 'branch', 'entity_id', 
+                     'is_reverted', 'reversion', 'reversion_timestamp', 'revision_id_reversion']
+VALUE_CHANGE_PK = ['revision_id', 'property_id', 'value_id']
 
-QUALIFIER_CHANGE_COLS = ['revision_id', 'property_id', 'property_label', 'value_id', 'qual_property_id', 'qual_property_label', 
-                         'value_hash', 'old_value', 'new_value', 'old_datatype', 'new_datatype', 'change_target', 
-                         'action', 'target', 'timestamp', 'week', 'year_month', 'year', 'entity_id', 'label', 'entity_label']
+RANK_CHANGE_COLS = ['revision_id', 'property_id', 'value_id', 'old_value', 
+                     'new_value',  'action', 'timestamp', 'label', 'entity_id', 
+                     'is_reverted', 'reversion', 'reversion_timestamp', 'revision_id_reversion']
+RANK_CHANGE_PK = ['revision_id', 'property_id', 'value_id']
 
-QUALIFIER_CHANGE_PK = ['revision_id', 'property_id', 'value_id', 'qual_property_id', 'value_hash', 'change_target']
+QUALIFIER_CHANGE_COLS = ['revision_id', 'property_id', 'value_id', 'qual_property_id', 
+                         'value_hash', 'old_value', 'new_value', 'old_datatype', 'new_datatype',
+                         'action', 'timestamp', 'entity_id', 'label']
+QUALIFIER_CHANGE_PK = ['revision_id', 'property_id', 'value_id', 'qual_property_id', 'value_hash']
 
-REFERENCE_CHANGE_COLS = ['revision_id', 'property_id', 'property_label', 'value_id', 'ref_property_id', 'ref_property_label', 
-                         'ref_hash', 'value_hash', 'old_value', 'new_value', 'old_datatype', 'new_datatype', 'change_target', 
-                         'action', 'target', 'timestamp', 'week', 'year_month', 'year', 'entity_id', 'label', 'entity_label']
+REFERENCE_CHANGE_COLS = ['revision_id', 'property_id', 'value_id', 'ref_property_id', 'ref_hash', 'value_hash', 
+                         'old_value', 'new_value', 'old_datatype', 'new_datatype', 
+                         'action', 'timestamp', 'entity_id', 'label']
+REFERENCE_CHANGE_PK = ['revision_id', 'property_id', 'value_id', 'ref_property_id', 'value_hash', 'ref_hash']
 
-REFERENCE_CHANGE_PK = ['revision_id', 'property_id', 'value_id', 'ref_property_id', 'value_hash', 'ref_hash', 'change_target']
-
-DATATYPE_METADATA_CHANGE_COLS = ['revision_id', 'property_id', 'property_label', 'value_id', 'old_value', 'new_value', 'old_datatype', 
-                                 'new_datatype', 'change_target', 'action', 'target', 'old_hash', 'new_hash', 
-                                 'timestamp', 'week', 'year_month', 'year', 'entity_id', 'label', 'entity_label']
+DATATYPE_METADATA_CHANGE_COLS = ['revision_id', 'property_id', 'value_id', 'old_value', 'new_value', 'old_datatype', 
+                                 'new_datatype', 'change_target', 'action', 
+                                 'timestamp', 'entity_id']
 DATATYPE_METADATA_CHANGE_PK = ['revision_id', 'property_id', 'value_id', 'change_target']
 
 # ------------------------------------------------------------------------------------------------------------------------------
 # FEATURE COLUMNS
 # ------------------------------------------------------------------------------------------------------------------------------
 
-ENTITY_FEATURE_COLS = [
+ENTITY_UPDATES_PK = [
     'revision_id',
     'property_id',
-    'property_label',
     'value_id',
-    'change_target',
-    'new_datatype',
-    'old_datatype', 
-    'action',
-    'old_value',
-    'new_value', 
-   
-    'token_overlap', 
-    'old_in_new',
-    'new_in_old',
-    'edit_distance_ratio',
-    'complete_replacement', 
-    'is_link_change',
-
-    'old_value_subclass_new_value', 
-    'new_value_subclass_old_value',
-
-    'old_value_located_in_new_value',
-    'new_value_located_in_old_value',
-    'old_value_has_parts_new_value',
-    'new_value_has_parts_old_value',
-
-    'old_value_part_of_new_value',
-    'new_value_part_of_old_value',
-
-    # 'new_value_is_metaclass_for_old_value',
-    # 'old_value_is_metaclass_for_new_value' ,
-
-    'old_value_label', # i add them in the featurec reation during parsing
-    'new_value_label', 
-    'old_value_description', 
-    'new_value_description',
-
-    'entity_label',
-    'label_cosine_similarity', 
-    'description_cosine_similarity',
-
-    'label', 
-    'processed'
 ]
-ENTITY_FEATURE_PK = ['revision_id', 'property_id', 'value_id', 'change_target']
 
+TEXT_UPDATES_PK = [
+    'revision_id',
+    'property_id',
+    'value_id',
+]
 
-ENTITY_ONLY_FEATURES_COLS_TYPES = {
-    'token_overlap': 'FLOAT', 
+ENTITY_UPDATES_COLS = [
+    'revision_id',
+    'property_id',
+    'value_id',
+    'old_value',
+    'new_value',
+    'old_value_label',
+    'new_value_label',
+    'old_value_description',
+    'new_value_description'
+]
+
+TEXT_UPDATES_COLS = [
+    'revision_id',
+    'property_id',
+    'value_id',
+    'old_value',
+    'new_value'
+]
+
+ENTITY_SIMPLE_FEATURES_TYPES = {
+    'token_overlap': 'FLOAT',
     'old_in_new': 'INT',
-    'new_in_old': 'INT', 
-    'edit_distance_ratio': 'FLOAT',
-    'complete_replacement': 'INT', 
+    'new_in_old': 'INT',
+    'complete_replacement': 'INT',
+    'word_alignment_ratio': 'FLOAT',
+    'word_insertions': 'INT',
+    'word_deletions': 'INT',
+    'word_substitutions': 'INT',
+    'has_significant_prefix': 'INT',
+    'has_significant_suffix': 'INT'
+}
 
-    'old_value_subclass_new_value': 'INT', 
-    'new_value_subclass_old_value': 'INT',
-
-    'old_value_located_in_new_value': 'INT',
-    'new_value_located_in_old_value': 'INT',
-    'old_value_has_parts_new_value': 'INT',
-    'new_value_has_parts_old_value': 'INT',
-
-    'old_value_part_of_new_value': 'INT',
-    'new_value_part_of_old_value': 'INT',
-    
+ENTITY_EMBEDDING_FEATURE_COLS = {
     'label_cosine_similarity': 'FLOAT', 
-    'description_cosine_similarity': 'FLOAT', 
-    'is_link_change': 'INT',
+    'description_cosine_similarity': 'FLOAT',
+
+    'old_to_new_contradiction': 'FLOAT',
+    'old_to_new_entailment': 'FLOAT', 
+    'old_to_new_neutral': 'FLOAT',
+    'new_to_old_contradiction': 'FLOAT', 
+    'new_to_old_entailment': 'FLOAT', 
+    'new_to_old_neutral': 'FLOAT',
+
+    'old_to_new_desc_contradiction': 'FLOAT', 
+    'old_to_new_desc_entailment': 'FLOAT', 
+    'old_to_new_desc_neutral': 'FLOAT',
+    'new_to_old_desc_contradiction': 'FLOAT', 
+    'new_to_old_desc_entailment': 'FLOAT', 
+    'new_to_old_desc_neutral': 'FLOAT'
 }
 
 BASE_KEY_TYPES = {
     'revision_id': 'BIGINT',
     'property_id': 'INT',
-    'value_id': 'TEXT',
-    'change_target': 'TEXT'
+    'value_id': 'TEXT'
 }
 
-PROP_REP_KEY_TYPES = {
-    'pair_id': 'BIGINT'
-}
-
-TIME_FEATURE_COLS = [
-    'revision_id',
-    'property_id',
-    'property_label',
-    'value_id',
-    'change_target',
-    'new_datatype',
-    'old_datatype',
-    'action',
-    'old_value',
-    'new_value',
-
-    # for time
-    'date_diff_days',
-    'sign_change',
-    # 'change_one_to_zero', # YYYY-01-01 -> YYYY-00-00 -> I treated this as formatting
-    'day_added',
-    'day_removed',
-    'month_added',
-    'month_removed',
-    'different_year',
-    'different_day',
-    'different_month',
-
-    'entity_label',
-    'label'
-]
-TIME_FEATURE_PK = ['revision_id', 'property_id', 'value_id', 'change_target']
-
-QUANTITY_FEATURE_COLS = [
-    'revision_id',
-    'property_id',
-    'property_label',
-    'value_id',
-    'change_target',
-    'new_datatype',
-    'old_datatype',
-    'action',
-    'old_value',
-    'new_value',
-
-    'sign_change', # format
-    'precision_change', # ref/unref/prop val update
-    'length_increase', # ref
-    'length_decrease', # unref
-    'whole_number_change', # prop val update
-    'old_is_prefix_of_new', # refinement
-    'new_is_prefix_of_old',  # unrefinement
-    'same_float_value', # for ref/unref/reformat
-
-    'entity_label',
-    'label'
-]
-QUANTITY_FEATURE_PK = ['revision_id', 'property_id', 'value_id', 'change_target']
-
-GLOBE_FEATURE_COLS = [
-    'revision_id',
-    'property_id',
-    'property_label',
-    'value_id',
-    'change_target',
-    'new_datatype',
-    'old_datatype',
-    'action',
-    'old_value',
-    'new_value',
-
-    # for globecoordinate
-    'latitude_sign_change',
-    'longitude_sign_change',
-    'latitude_whole_number_change',
-    'longitude_whole_number_change',
-    'latitude_precision_change',
-    'longitude_precision_change',
-    'latitude_length_increase',
-    'latitude_length_decrease',
-    'longitude_length_increase',
-    'longitude_length_decrease',
-    'latitude_old_is_prefix_of_new',
-    'latitude_new_is_prefix_of_old',
-    'latitude_same_float_value',
-    'longitude_old_is_prefix_of_new',
-    'longitude_new_is_prefix_of_old',
-    'longitude_same_float_value',
+TEXT_SIMPLE_FEATURE_COLS = [
     
-    'entity_label', 
-    'label_latitude',
-    'label_longitude'
-]
-GLOBE_FEATURE_PK = ['revision_id', 'property_id', 'value_id', 'change_target']
-
-TEXT_FEATURE_COLS = [
-    'revision_id',
-    'property_id',
-    'property_label',
-    'value_id',
-    'change_target',
-    'new_datatype',
-    'old_datatype',
-    'action',
-    'old_value',
-    'new_value',
-      
-    'token_overlap', 
+    'token_overlap',
     'old_in_new',
-    'new_in_old', 
-    'edit_distance_ratio',
+    'new_in_old',
     'complete_replacement',
+    'word_alignment_ratio',
+    'word_insertions',
+    'word_deletions',
+    'word_substitutions',
+    'has_significant_prefix',
+    'has_significant_suffix',
 
-    'length_diff_abs',
-    'token_count_old', 
-    'token_count_new', 
-    'levenshtein_distance',  
-    # 'structure_similarity',
-    'same_value_without_special_char', 
+    'word_count_old',
+    'word_count_new',
     'special_char_count_diff',
-    # 'special_chars_added',
-    # 'special_chars_removed',
-    # 'only_special_char_change',
+    'whitespace_count_diff',
+    'accent_char_count_diff',
+    'case_swap_count',
     'char_insertions',
     'char_deletions',
     'char_substitutions',
     'adjacent_char_swap',
-    # 'avg_word_similarity',
-    'has_significant_prefix',
-    'has_significant_suffix',
+    'raw_edit_distance_ratio',
+    'residual_edit_distance_ratio',
+    'stopword_diff_ratio',
+    'plural_pair_ratio',
+    'other_word_diff_count',
+    'other_word_ratio'
+]
 
-    'entity_label', 
-
+TEXT_EMBEDDING_FEATURE_COLS = [
     'value_cosine_similarity',
 
-    'label',
-    'processed'
+    'old_to_new_contradiction',
+    'old_to_new_entailment', 
+    'old_to_new_neutral',
+    'new_to_old_contradiction', 
+    'new_to_old_entailment', 
+    'new_to_old_neutral',
 ]
-TEXT_FEATURE_PK = ['revision_id', 'property_id', 'value_id', 'change_target']
-
-PROPERTY_REPLACEMENT_FEATURE_COLS = [
-
-    'delete_revision_id',
-    'delete_property_id',
-    'delete_value_id',
-    'delete_change_target',
-
-    'create_revision_id',
-    'create_property_id',
-    'create_value_id',
-    'create_change_target',
-    
-    'time_diff',
-    'same_day',
-    'same_hour',
-    'same_revision',
-    'delete_before_create',
-    'same_user',
-    'property_label_similarity',
-
-    'delete_timestamp',
-    'create_timestamp',
-
-    'delete_property_label',
-    'create_property_label',
-
-    'delete_user_id',
-    'create_user_id',
-    
-    'label'
-]
-PROPERTY_REPLACEMENT_PK = ['delete_revision_id', 'delete_property_id', 'delete_value_id', 'delete_change_target', 'create_revision_id', 'create_property_id', 'create_value_id', 'create_change_target']
 
 # ------------------------------------------------------------------------------------------------------------------------------
 # STATS COLUMNS
 # ------------------------------------------------------------------------------------------------------------------------------
 ENTITY_STATS_COLS = [
     'entity_id',
+    'qid',
     'entity_label',
+    'entity_description',
     'entity_types_31',
     
     'num_revisions',
@@ -427,7 +297,7 @@ ENTITY_STATS_COLS = [
     'num_reverted_edits_delete',
     'num_reverted_edits_update',
 
-    'file_path',
+    'file_id',
 
     'total_xml_parse_time_sec',
     'total_process_time_sec',
@@ -437,58 +307,9 @@ ENTITY_STATS_COLS = [
     'total_rev_edit_time_sec',
 
     'total_feature_creation_sec',
-    'num_feature_creations_timed'
+    'num_feature_creations_timed',
+
+    'total_rule_based_classification_sec'
 ]
 
 ENTITY_STATS_PK = ['entity_id']
-
-ENTITY_PROPERTY_TIME_STATS_COLS = [
-    'entity_id',
-    'property_id',
-    'time_period',
-    'num_value_changes',
-    'num_value_additions',
-    'num_value_deletions',
-    'num_value_updates',
-    'num_statement_additions',
-    'num_statement_deletions',
-    'num_soft_insertions',
-    'num_soft_deletions',
-    'num_rank_changes',
-    'num_rank_creates',
-    'num_rank_deletes',
-    'num_rank_updates',
-    'num_reference_additions',
-    'num_reference_deletions',
-    'num_qualifier_additions',
-    'num_qualifier_deletions',
-    'num_revisions',
-    'num_revisions_bot',
-    'num_revisions_human',
-    'num_revisions_anonymous',
-    'num_unique_editors'
-]
-ENTITY_PROPERTY_TIME_STATS_PK = ['entity_id', 'property_id', 'time_period']
-
-
-ACTION_ENCODING = {
-    'UPDATE': 2,
-    'DELETE': 1,
-    'CREATE': 0
-}
-
-USER_TYPE_ENCODING = {
-    'HUMAN': 2,
-    'BOT': 1,
-    'ANONYMOUS': 0
-}
-
-DAY_OF_WEEK_ENCODING = {
-    'Friday': 0, 
-    'Monday': 1, 
-    'Saturday': 2, 
-    'Sunday': 3, 
-    'Thursday': 4, 
-    'Tuesday': 5, 
-    'Wednesday': 6
-}

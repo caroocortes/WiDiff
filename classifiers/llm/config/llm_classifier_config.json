@@ -1,0 +1,7 @@
+{
+    "llm_id": "Qwen/Qwen3.5-35B-A3B-FP8",
+    "base_url": "http://gx05:8001/v1",
+    "temperature": 0,
+    "max_tokens": 100,
+    "api_key": "EMPTY"
+}

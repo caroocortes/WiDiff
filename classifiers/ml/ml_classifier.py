@@ -1,0 +1,966 @@
+import glob
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from xgboost import XGBClassifier
+from sklearn.preprocessing import MultiLabelBinarizer, StandardScaler, LabelBinarizer
+from sklearn.model_selection import GridSearchCV, StratifiedKFold
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from iterstrat.ml_stratifiers import MultilabelStratifiedKFold
+from IPython.display import display
+import csv
+
+import io
+import matplotlib.pyplot as plt
+import pickle
+import time
+import os
+import numpy as np
+import pickle
+import json
+
+from .utils import get_time_unit
+from classifiers.feature_creation import FeatureCreation
+from parser_scripts.const import TEXT_EMBEDDING_FEATURE_COLS, TEXT_SIMPLE_FEATURE_COLS, ENTITY_SIMPLE_FEATURES_TYPES, ENTITY_EMBEDDING_FEATURE_COLS, ENTITY_UPDATES_COLS, TEXT_UPDATES_COLS
+from .const import BASE_KEY_TYPES, ML_MODELS, ML_MODELS_LABELS, TRAINING_DATASET_DIR, TRAINING_INFO_DIR, FEATURES_DIR
+from sql_runner.sql_runner import SQLRunner
+
+class MLClassifier():
+    def __init__(self, config_path: str):
+
+        with open(config_path, 'r') as f:
+            self.config = json.load(f)
+
+        self.feature_creation = FeatureCreation()
+
+        self.random_state = self.config.get('random_state', 42)
+        self.fold_splits = self.config.get('fold_splits', 5)
+        self.prob_threshold = self.config.get('prob_threshold', 0.5)
+
+        self.runtimes = dict()
+
+    # ------------------------------------------------------------------------
+    # Methods to train models
+    # ------------------------------------------------------------------------
+
+    def get_features(self, datatype, df):
+
+        if datatype == 'text':
+
+            df[TEXT_SIMPLE_FEATURE_COLS] = df.apply(
+                lambda row: self.feature_creation.create_text_features('text', row['old_value'], row['new_value']),
+                axis=1, result_type='expand'
+            )
+            df = self.feature_creation.create_embedding_features(df, old_col='old_value', new_col='new_value')
+            feature_cols = TEXT_SIMPLE_FEATURE_COLS + TEXT_EMBEDDING_FEATURE_COLS
+
+        elif datatype == 'entity':
+            entity_simple_features = list(ENTITY_SIMPLE_FEATURES_TYPES.keys())
+            df[entity_simple_features] = df.apply(
+                lambda row: self.feature_creation.create_text_features('entity', row['old_value_label'], row['new_value_label']),
+                axis=1, result_type='expand'
+            )
+            df = self.feature_creation.create_embedding_features(df, old_col='old_value_label', new_col='new_value_label')
+            feature_cols = entity_simple_features + list(ENTITY_EMBEDDING_FEATURE_COLS.keys())
+
+        return df, feature_cols
+
+    def _load_gs_lookup(self, datatype):
+        """
+            Loads the gold standard labels once and caches them in memory,
+            keyed by (old_value, new_value) -> label.
+            Rows matching this lookup already have a known-correct label,
+            so they can skip feature computation + model inference entirely.
+        """
+        cache_attr = f'_gs_lookup_{datatype}'
+        cached = getattr(self, cache_attr, None)
+        if cached is not None:
+            return cached
+
+        gs_path = f'{TRAINING_DATASET_DIR}/gs_{datatype}.csv'
+        gs_df = pd.read_csv(gs_path)
+
+        gs_df['old_value'] = gs_df['old_value'].astype(str).str.strip().str.strip('"')
+        gs_df['new_value'] = gs_df['new_value'].astype(str).str.strip().str.strip('"')
+
+        lookup = gs_df.set_index(['old_value', 'new_value'])['label'].to_dict()
+        setattr(self, cache_attr, lookup)
+        return lookup
+
+    def _split_by_gs(self, df, gs_lookup):
+        """
+            Splits a batch DataFrame into rows already covered by the gold
+            standard (df_gs) and rows that still need feature computation +
+            model inference (df_remaining).
+        """
+        keys = list(zip(
+            df['old_value'].astype(str),
+            df['new_value'].astype(str)
+        ))
+        gs_labels = pd.Series([gs_lookup.get(k) for k in keys], index=df.index)
+
+        is_gs = gs_labels.notna()
+        df_gs = df[is_gs].copy()
+        df_gs['_gs_label'] = gs_labels[is_gs]
+
+        df_remaining = df[~is_gs].copy()
+
+        return df_gs, df_remaining
+
+    def perform_grid_search(self, classifier, datatype, X_scaled, y_binary, cv):
+        print(f'Performing grid search for {classifier} on datatype {datatype}', flush=True)
+        """
+            Model Config structure:
+            {
+                "Random_Forest": {
+                    "string": {
+                        "n_estimators": int,
+                        "max_depth": int,
+                        ...
+                    },
+                    "entity": {...},
+                    ...
+                },
+                "KN": {...} // the same structure as RF
+                "Gradient_Boosting": {...} // the same structure as RF
+            }
+        """
+        
+        if classifier == 'Random_Forest':
+            param_grid = {
+                'n_estimators': [50, 100, 150, 200],
+                'max_depth': [None, 10, 20, 40, 80],
+                'min_samples_leaf': [1, 2, 4, 8],
+                'max_features': ['sqrt', 'log2', None],
+                'bootstrap': [True, False]
+            }
+            
+            # This already does cross-validation internally (fold=5)
+            grid_search = GridSearchCV(RandomForestClassifier(self.random_state), param_grid=param_grid, cv=cv)
+
+        elif classifier == 'KN':
+            param_grid = {
+                'n_neighbors': [3, 5, 7, 10, 15, 20, 25, 30],
+                'weights': ['uniform', 'distance']
+            }
+            grid_search = GridSearchCV(KNeighborsClassifier(), param_grid=param_grid, cv=cv)
+
+        elif classifier == 'XGBoost': # does not require meta model for multi-label
+            # https://www.kaggle.com/code/prashant111/a-guide-on-xgboost-hyperparameters-tuning
+            param_grid = {
+                'n_estimators': [50, 100, 150, 200],
+                'max_depth': [3, 5, 7, 10],
+                'learning_rate': [0.01, 0.05, 0.1, 0.2],
+                'subsample': [0.6, 0.8, 1.0],
+                'colsample_bytree': [0.6, 0.8, 1.0],
+                'scale_pos_weight': [1, 2, 5, 10]  # for unbalanced classes
+            }
+
+            grid_search = GridSearchCV(XGBClassifier(random_state=self.random_state), param_grid=param_grid, cv=cv)
+
+        grid_search.fit(X_scaled, y_binary)
+        best_params = grid_search.best_params_
+
+        # remove the prefix estimator__ from the result
+        best_params = {
+            key.replace('estimator__', ''): value 
+            for key, value in best_params.items()
+        }
+
+        return best_params
+
+    def get_model_instance(self, classifier, best_params):
+        """
+            Returns model instance for the specified classifier.
+            Grid search is performed to find the best parameters
+        """
+        
+        if classifier == 'Random_Forest': # already supports multi-label
+            
+            model = RandomForestClassifier(
+                n_estimators=best_params['n_estimators'], 
+                max_depth=best_params['max_depth'],
+                class_weight='balanced', # this handles unbalanced classes
+                random_state=self.random_state
+            )
+
+        elif classifier == 'KN': # already supports multi-label
+
+            model = KNeighborsClassifier(n_neighbors=best_params['n_neighbors'])
+
+        elif classifier == 'XGBoost': 
+            
+            # Base classifier
+            model = XGBClassifier(
+                n_estimators=best_params['n_estimators'], 
+                max_depth=best_params['max_depth'],
+                random_state=self.random_state 
+            )
+        
+        return model, None
+
+    def perform_kfold_training(self, X, y_binary, datatype, label_binarizer, feature_cols, df_index, classifier):
+        print(f'Performing k-fold training for {datatype}, {classifier}', flush=True)
+        
+        if datatype == 'text':
+            cv = MultilabelStratifiedKFold(n_splits=self.fold_splits, shuffle=True, random_state=self.random_state)
+            split = cv.split(X, y_binary)
+        else: # entity is not multi label
+            y_labels_1d = y_binary.argmax(axis=1)  # collapse one-hot back to a single class label per row, for stratification only
+            cv = StratifiedKFold(n_splits=self.fold_splits, shuffle=True, random_state=self.random_state)
+            split = cv.split(X, y_labels_1d)
+
+        results_folds = []
+        # aggregate all test and predictions across all folds, given that each instance appears only once in the test set
+        # across all folds. Then, I have a prediction for each instance and then I calculate precision, recall, accuracy, f1
+        all_y_test = []
+        all_y_pred = []
+
+        start_time = time.time()
+
+        for fold, (train_index, test_index) in enumerate(split, 1):
+            print('FOLD: ', fold, flush=True)
+
+            # TODO: remove, only for test
+            # train_labels = label_binarizer.inverse_transform(y_binary[train_index])
+            # test_labels = label_binarizer.inverse_transform(y_binary[test_index])
+
+            # print('Train label distribution:')
+            # print(pd.Series(train_labels).value_counts())
+
+            # print('Test label distribution:')
+            # print(pd.Series(test_labels).value_counts())
+
+            X_train, X_test = X.iloc[train_index], X.iloc[test_index]
+            y_train, y_test = y_binary[train_index], y_binary[test_index]
+
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+
+            # Inner CV to find best hyperparameters for the model
+            # this is ran only on the training, so the test is not seen
+            gs_cv = MultilabelStratifiedKFold(n_splits=3, shuffle=True, random_state=self.random_state)
+
+            best_params = self.perform_grid_search(
+                classifier, datatype,
+                X_train_scaled, y_train,           
+                gs_cv                  
+            )
+
+            model, _ = self.get_model_instance(classifier, best_params)
+
+            metrics_results = {}
+
+            actual_test_index = df_index[test_index]
+
+            clf = model.fit(X_train_scaled, y_train) # fit model on trainting data
+
+            y_pred = np.zeros((len(X_test), len(label_binarizer.classes_)))
+            X_test_scaled = scaler.transform(X_test)
+            y_pred_proba = model.predict_proba(X_test_scaled)
+            # predict_proba from docs: ndarray of shape (n_samples, n_classes), or a list of such arrays
+            # The class probabilities of the input samples. The order of the classes corresponds to that in the attribute classes_.
+            
+            if isinstance(y_pred_proba, list):
+                # the sklearn classifiers return a list of arrays, one per label
+                # each array has shape (n_samples, 2), where the second column is the positive class probability
+
+                for label_idx in range(len(label_binarizer.classes_)):
+                    probs = y_pred_proba[label_idx][:, 1] # positive class prob for label
+                    y_pred[:, label_idx] = (probs >= self.prob_threshold).astype(int)
+
+                # cases where none of the probs reaches 0.5
+                no_prediction_mask = y_pred.sum(axis=1) == 0
+                if no_prediction_mask.any():
+                    # get all probabilities as array (n_samples, n_classes)
+                    all_probs = np.column_stack([y_pred_proba[j][:, 1] for j in range(len(label_binarizer.classes_))]) # get positive class porb
+                    # for samples with no prediction, set highest prob class to 1
+                    max_indices = np.argmax(all_probs[no_prediction_mask], axis=1)
+                    y_pred[no_prediction_mask, max_indices] = 1
+            else:
+                # XGboost returns an ndarray with shape (n_samples, n_classes)
+                # so it gives you for every sample the probabilities for each class
+                y_pred = (y_pred_proba >= self.prob_threshold).astype(int)    
+
+                no_prediction_mask = y_pred.sum(axis=1) == 0
+                if no_prediction_mask.any():
+                    max_indices = np.argmax(y_pred_proba[no_prediction_mask], axis=1)
+                    y_pred[no_prediction_mask, max_indices] = 1
+    
+            for i, class_label in enumerate(label_binarizer.classes_):
+                #NOTE: this selects all rows for label i
+                if not class_label in metrics_results:
+                    metrics_results[class_label] = {}
+
+                label_accuracy = accuracy_score(y_test[:, i], y_pred[:, i])
+                label_precision = precision_score(y_test[:, i], y_pred[:, i], zero_division=0)
+                label_recall = recall_score(y_test[:, i], y_pred[:, i], zero_division=0)
+                label_f1 = f1_score(y_test[:, i], y_pred[:, i], zero_division=0)
+                
+                metrics_results[class_label]['accuracy'] = label_accuracy
+                metrics_results[class_label]['precision'] = label_precision
+                metrics_results[class_label]['recall'] = label_recall
+                metrics_results[class_label]['f1'] = label_f1
+
+            all_y_test.append(y_test)
+            all_y_pred.append(y_pred)
+
+            results_folds.append({
+                'classifier': classifier.lower(),
+                'fold': fold,
+                'scaler': scaler,
+                'metrics_results': metrics_results,
+                'model': clf,
+                'features': feature_cols,
+                'train_index': train_index, 
+                'test_index': actual_test_index,
+                'label_binarizer': label_binarizer,
+                'best_params': best_params,
+                # 'label_distribution': Counter(all_labels),
+                'X_test': X_test,
+                'y_pred': y_pred,
+                'y_test': y_test
+            })
+
+        training_time = time.time() - start_time
+        if datatype not in self.runtimes:
+            self.runtimes[datatype] = dict()
+        
+        self.runtimes[datatype][classifier] = training_time
+        
+        labels = label_binarizer.classes_
+
+        micro_averages = dict()
+        all_y_test = np.vstack(all_y_test) # concatenate all folds
+        all_y_pred = np.vstack(all_y_pred)
+        
+        for i, class_label in enumerate(labels):
+            micro_averages[class_label] = {
+                'precision': precision_score(all_y_test[:, i], all_y_pred[:, i], zero_division=0),
+                'recall': recall_score(all_y_test[:, i], all_y_pred[:, i], zero_division=0),
+                'accuracy': accuracy_score(all_y_test[:, i], all_y_pred[:, i]),
+                'f1': f1_score(all_y_test[:, i], all_y_pred[:, i], zero_division=0)
+            }
+
+        print(f"Training completed for classifier {classifier}. Time taken: {training_time:.2f} seconds")
+        for datatype in micro_averages:
+            print(f"Micro averages for {datatype}:")
+            print('F1:', micro_averages[datatype]['f1'])
+            print('Precision:', micro_averages[datatype]['precision'])
+            print('Recall:', micro_averages[datatype]['recall'])
+            print('Accuracy:', micro_averages[datatype]['accuracy'])
+
+        return results_folds, micro_averages
+    
+    def train_classifier(self):
+        os.makedirs(FEATURES_DIR, exist_ok=True)
+        
+        datatypes = ['text', 'entity'] 
+
+        classifiers_rf = dict()
+        classifiers_kn = dict()
+        classifiers_xgb = dict()
+        
+        scalers = dict()
+        for datatype in datatypes:
+            print(f"\n{'='*50}")
+            print(f"Training classifier for: {datatype}", flush=True)
+            print(f"{'='*50}", flush=True)
+
+            df_gs = pd.read_csv(f'{TRAINING_DATASET_DIR}/gs_{datatype}.csv')
+
+            #############################
+            #   Load or create features
+            #############################
+            if os.path.isfile(f'{FEATURES_DIR}/gs_features_{datatype}.csv'):
+                df = pd.read_csv(f'{FEATURES_DIR}/gs_features_{datatype}.csv', index_col=0)
+                with open(f'{FEATURES_DIR}/feature_cols_{datatype}.pkl', 'rb') as f:
+                    feature_cols = pickle.load(f)
+                print('Features already exist, loading.', flush=True)
+            else:
+                print('Features dont exist, creating.', flush=True)
+                start = time.perf_counter()
+                # df is already filtered per datatype inside get_features
+                df, feature_cols = self.get_features(datatype, df_gs)
+                end = time.perf_counter()
+                print(f"Time taken to create features for {datatype}: {end - start} seconds", flush=True)
+
+                os.makedirs(FEATURES_DIR, exist_ok=True)
+                df.to_csv(f'{FEATURES_DIR}/gs_features_{datatype}.csv', index=True)
+
+            with open(f'{FEATURES_DIR}/feature_cols_{datatype}.pkl', 'wb') as f:
+                pickle.dump(feature_cols, f)
+
+            # Fill NAN/Inf with 0
+            X = df[feature_cols].astype(float).fillna(0) # features
+            X.replace([np.inf, -np.inf], np.nan, inplace=True)
+            X.fillna(0, inplace=True)
+
+            label_binarizer = None
+            if datatype == 'text':
+                # Split label into binary columns
+                df['labels_list'] = df['label'].fillna('').str.split(',').apply(lambda x: [l.strip() for l in x])
+        
+                # all_labels = [label for labels in df['labels_list'] for label in labels]
+
+                # To do multi-label classification we need 1 column per label
+                label_binarizer = MultiLabelBinarizer()
+                y_binary = label_binarizer.fit_transform(df['labels_list'])
+                
+            else: # entity is not multi label
+                label_binarizer = LabelBinarizer()
+                y_binary = label_binarizer.fit_transform(df['label'])
+
+            results_folds_rf, micro_averages_rf = self.perform_kfold_training(X, y_binary, datatype, label_binarizer, feature_cols, df.index.values, classifier='Random_Forest')
+            results_folds_kn, micro_averages_kn = self.perform_kfold_training(X, y_binary, datatype, label_binarizer, feature_cols, df.index.values, classifier='KN')
+            results_folds_xg, micro_averages_xg = self.perform_kfold_training(X, y_binary, datatype, label_binarizer, feature_cols, df.index.values, classifier='XGBoost')
+
+            classifiers_rf[datatype] = {
+                'results_folds': results_folds_rf,
+                'micro_averages': micro_averages_rf
+            }
+
+            classifiers_kn[datatype] = {
+                'results_folds': results_folds_kn,
+                'micro_averages': micro_averages_kn
+            }
+
+            classifiers_xgb[datatype] = {
+                'results_folds': results_folds_xg,
+                'micro_averages': micro_averages_xg
+            }
+
+        models_to_save = {
+            'random_forest': classifiers_rf,
+            'kn': classifiers_kn,
+            'xgboost': classifiers_xgb
+        }
+
+        os.makedirs(TRAINING_INFO_DIR, exist_ok=True)
+
+        for model, dict_ in models_to_save.items():
+            if not os.path.isfile(f'{TRAINING_INFO_DIR}/training_info_{model}.pkl'):
+                with open(f'{TRAINING_INFO_DIR}/training_info_{model}.pkl', 'wb') as f:
+                    pickle.dump(dict_, f)
+            else:
+                try:
+                    with open(f'{TRAINING_INFO_DIR}/training_info_{model}.pkl', 'rb') as f:
+                        info = pickle.load(f)
+                except Exception as e:
+                    print(f"Error loading existing training info for {model}: {e}")
+                    raise e
+                
+                for dt_class in dict_.keys():
+                    info[dt_class] = dict_[dt_class]
+                
+                with open(f'{TRAINING_INFO_DIR}/training_info_{model}.pkl', 'wb') as f:
+                    pickle.dump(info, f)
+
+        os.makedirs(FEATURES_DIR, exist_ok=True)
+        path_to_scaler = f'{FEATURES_DIR}/scalers.pkl'
+        with open(path_to_scaler, 'wb') as f:
+            pickle.dump(scalers, f)
+
+        with open(f'{TRAINING_INFO_DIR}/training_runtimes.pkl', 'wb') as f:
+            pickle.dump(self.runtimes, f)
+
+        for dt_class, runtime_models in self.runtimes.items():
+
+            print(f'# ------ {dt_class.upper()} ------ #')
+            for model, runtime in runtime_models.items():
+                print(f'{model}: {runtime} seconds')
+            print('# ------------------------------ #')
+        
+    # ------------------------------------------------------------------------
+    # Methods to classify changes with the trained models
+    # ------------------------------------------------------------------------
+    def classify_batch(self, training_info_model, df, X, X_index, dt_label):
+        """
+            We do voting with the models from all folds
+            Make all models prdict, average the prob for the classes across all folds, pick the probs that are > 0.5
+            If no prob is > 0.5, take the highest one (this inherently means that change will only have one label assigned, 
+            for the other cases multiple labels may be assigned)
+        """
+
+        # load results_folds, has the trained model
+        results_folds = training_info_model[dt_label]['results_folds']
+
+        all_predictions = []
+
+        for i, fold_result in enumerate(results_folds):
+            model = fold_result['model']
+
+            # scale features with same scalers used during training
+            scaler = fold_result['scaler']
+            X_scaled = scaler.transform(X)
+            
+            # Get probability predictions for each class
+            # For multi-label, this returns shape (n_samples, n_classes)
+            pred_proba = model.predict_proba(X_scaled)
+            
+            # predict_proba for multi-label returns list of arrays (one per class)
+            # Each element is (n_samples, 2) for [prob_class_0, prob_class_1]
+            # in my case it would be 1 array per label, so for refinement: [[prob_no_refinement_cahnge_1, prob_refinement_change_1], [prob_no_refinement_change_2, prob_refinement_change_2]]
+            # want (n_samples, n_classes) with prob of class being 1
+            
+            if isinstance(pred_proba, list):  # Multi-label case
+                # positive class (index 1) for each label
+                # each p is an array of lists, corresponding to a specific label
+                # when we do p[:, 1] we are getting the prob of class 1 for all examples, for that label
+                # with np.column_stack, we stack them on a column, so we get:
+                # e.g. pred_proba = array([[0.99799539, 0.00200461], [0.99799539, 0.00200461],[0.00441102, 0.99558898]]), array([[0.99322399, 0.00677601],[0.99606133, 0.00393867],[0.01199732, 0.98800268]])
+                # p = array([[0.99799539, 0.00200461], [0.99799539, 0.00200461],[0.00441102, 0.99558898]])
+                # p[:, 1] = [ 0.00200461
+                #             0.00200461
+                #             0.99558898 ]
+                # for the next label, it will be another column
+                pred_proba_positive = np.column_stack([p[:, 1] for p in pred_proba]) 
+            else:  # Single-label case
+                pred_proba_positive = pred_proba
+            
+            # has one array for each fold
+            all_predictions.append(pred_proba_positive)
+
+        # Stack all predictions: shape (n_folds, n_samples, n_classes)
+        all_predictions = np.array(all_predictions)
+
+        # Average across folds: shape (n_samples, n_classes)
+        avg_prediction = np.mean(all_predictions, axis=0)
+
+        # Apply probability threshold for each instance
+        final_labels = (avg_prediction >= self.prob_threshold).astype(int)
+
+        label_binarizer = results_folds[0]['label_binarizer'] # it's the same for all folds
+        
+        for i in range(len(final_labels)):
+            if not final_labels[i].any():                    # no label -> fallback to argmax
+                final_labels[i, np.argmax(avg_prediction[i])] = 1
+                continue
+
+        # get actual label names
+        final_labels_transformed = label_binarizer.inverse_transform(final_labels)
+
+        # create list of labels
+        def format_predicted_label(labels):
+            if isinstance(labels, str):
+                return labels if labels else '(none)'
+            return ', '.join(labels) if labels else '(none)'
+
+        pred_df = pd.DataFrame({
+            'predicted_labels': [format_predicted_label(labels) for labels in final_labels_transformed]
+        }, index=X_index)
+
+        # join labels list to original data
+        results_df = df.join(pred_df)
+
+        return results_df
+    
+    def classify_changes(self, dt_label, table_prefix, db_config_path, batch_size=1000000, max_batches=None, ):
+        """
+            Classify changes for a single datatype/label in smaller batches.
+            The DB only stores the raw old/new values (+ labels/descriptions
+            for entity), so features are computed per batch via get_features
+            instead of being read back already-computed.
+        """
+        print(f'Starting classification for {dt_label} with batch size {batch_size}', flush=True)
+
+        key_cols = list(BASE_KEY_TYPES.keys())
+        key_cols_str = ', '.join(key_cols)
+
+        raw_cols = ENTITY_UPDATES_COLS if dt_label == 'entity' else TEXT_UPDATES_COLS
+        value_cols = sorted(raw_cols - set(key_cols))
+        value_cols_str = ', '.join(value_cols)
+
+        table_name = dt_label
+        label_column = 'label'
+
+        # TODO: remove this
+        rb_label_filter = "(rb_label = '' or rb_label IS NULL)"
+
+        # only text changes go through gold-standard rows here - entity ones
+        # are already filtered out upstream by entity_rb_classification,
+        # which sets `label` for any row found in the gold standard
+        gs_lookup = self._load_gs_lookup(dt_label) if dt_label == 'text' else None
+
+        if db_config_path:
+            sql_runner = SQLRunner(db_config_path)
+            conn = sql_runner.get_connection()
+            cursor = conn.cursor()
+
+            key_cols_temp = ', '.join([f'{col} {col_type}' for col, col_type in BASE_KEY_TYPES.items()])
+
+            cursor.execute(f"ALTER TABLE features_{table_name}{table_prefix} DROP COLUMN IF EXISTS {label_column}, ADD COLUMN IF NOT EXISTS {label_column} TEXT")
+            conn.commit()
+            cursor.execute(f"CREATE TEMP TABLE temp_predictions_{dt_label} ({key_cols_temp}, predicted_labels TEXT)")
+
+            num_batches = 0
+
+            # load best model
+            with open(f'{TRAINING_INFO_DIR}/best_model_training_info.pkl', 'rb') as f:
+                training_info_model = pickle.load(f)
+
+            while True:
+                if max_batches and num_batches >= max_batches:
+                    print(f'Loaded {max_batches} batches from DB', flush=True)
+                    break
+
+                time_0 = time.time()
+                query = f"""
+                    SELECT {key_cols_str}, {value_cols_str}
+                    FROM features_{table_name}{table_prefix}
+                    WHERE
+                    (label = '' OR label IS NULL) AND
+                    {rb_label_filter}
+                    LIMIT {batch_size}
+                """
+
+                df = sql_runner.query_to_df(query)
+                conn.commit() # close read transaction to release locks
+
+                time_1 = time.time()
+                print(f'Finished loading batch {num_batches+1} from DB, took {time_1 - time_0:.2f} seconds')
+
+                if len(df) == 0:
+                    break
+
+                if gs_lookup is not None:
+                    df_gs, df_remaining = self._split_by_gs(df, gs_lookup)
+                    if len(df_gs) > 0:
+                        print(f'Found {len(df_gs)} rows in gold standard, label already set', flush=True)
+                else:
+                    df_gs, df_remaining = df.iloc[0:0].copy(), df
+
+                results_parts = []
+
+                if len(df_gs) > 0:
+                    results_parts.append(
+                        df_gs[key_cols].assign(predicted_labels=df_gs['_gs_label'].values)
+                    )
+
+                if len(df_remaining) > 0:
+                    print(f'Found {len(df_remaining)} rows not in gold standard, computing features', flush=True)
+
+                    time_0 = time.time()
+                    df_remaining, feature_cols = self.get_features(dt_label, df_remaining)
+                    time_1 = time.time()
+                    print(f'Finished computing features for batch {num_batches+1}, took {time_1 - time_0:.2f} seconds')
+
+                    X = df_remaining[feature_cols].astype(float).fillna(0)
+                    X.replace([np.inf, -np.inf], np.nan, inplace=True)
+                    X.fillna(0, inplace=True)
+
+                    time_0  = time.time()
+                    results = self.classify_batch(training_info_model, df_remaining, X, df_remaining.index, dt_label)
+                    time_1 = time.time()
+                    print(f'Finished classifying batch {num_batches+1}, took {time_1 - time_0:.2f} seconds')
+
+                    results_parts.append(results[key_cols + ['predicted_labels']])
+
+                results_filtered = pd.concat(results_parts, ignore_index=True)
+
+                buffer = io.StringIO()
+                results_filtered.to_csv(buffer, index=False, header=False, sep=';', quoting=csv.QUOTE_NONE, escapechar='\\')
+                buffer.seek(0)
+
+                start_time = time.time()
+                cursor.copy_expert(f"COPY temp_predictions_{dt_label} FROM STDIN (FORMAT CSV, DELIMITER ';' , QUOTE '\"', ESCAPE '\\')", buffer)
+                elapsed_time = time.time() - start_time
+                print(f'Finished loading to temp table in {elapsed_time:.2f} seconds')
+
+                start_time = time.time()
+                # Update labels
+                cursor.execute(f"""
+                    UPDATE features_{table_name}{table_prefix} f
+                    SET {label_column} = tp.predicted_labels
+                    FROM temp_predictions_{dt_label} tp 
+                    WHERE 
+                        {' AND '.join([f'f.{key_col} = tp.{key_col}' for key_col in key_cols])}
+                """)
+                elapsed_time = time.time() - start_time
+                final_time, unit = get_time_unit(elapsed_time)
+                print(f'Finished updating table in {final_time} {unit}')
+
+                cursor.execute(f"TRUNCATE TABLE temp_predictions_{dt_label}")
+
+                conn.commit()
+
+                num_batches += 1
+            
+            print(f'Classified {num_batches} batches from DB for {dt_label}')
+
+        else:
+            print('No DB config provided, cannot classify in batches from DB')
+            return
+            
+    # ------------------------------------------------------------------------------------------------
+    # Methods to calculate evaluation metrics for the model + best model selection
+    # ------------------------------------------------------------------------------------------------
+    
+    @staticmethod
+    def create_data_structure_for_visualization():
+
+        """
+        training_info_{model}.pkl structure:
+        {
+            "datatype": { # for reverted_edit & property_replacement, datatype is the name of the label
+                'results_folds': [results per fold],
+                'micro_averages': {}
+            ...
+        }
+
+        results per fold:
+        {
+            'classifier': string, # kn, xgboost, random_forest
+            'fold': int,
+            'metrics_results': {
+                'label': { 
+                    'precision': float,
+                    'recall': float,
+                    'accuracy': float,
+                    'f1': float
+                },
+                ....
+            },
+            'model': clf,
+            'base_model': model,
+            'features': feature_cols,
+            ....
+        }
+
+        Final structure to save:
+        "model": {
+            "datatype":{
+                "label": {
+                    "precision": float,
+                    "recall": float,
+                    "accuracy": float,
+                    "f1": float
+                }
+            }
+        }
+        """
+
+        # Create data structure
+        results = {}
+        for model in ['kn', 'random_forest', 'xgboost']:
+            print(f'Processing model: {model}')
+            
+            with open(f'{TRAINING_INFO_DIR}/training_info_{model}.pkl', 'rb') as f:
+                training_info_model = pickle.load(f)
+            
+            results[model] = {}
+            
+            # go over each fold's results for a single datatype
+            for datatype, training_info in training_info_model.items():
+                
+                micro_averages = training_info['micro_averages']
+
+                results[model][datatype] = {}
+
+                for label, metric_values in micro_averages.items(): # metric values across all folds
+
+                    results[model][datatype][label] = {
+                        'precision': metric_values['precision'],
+                        'recall': metric_values['recall'],
+                        'accuracy': metric_values['accuracy'],
+                        'f1': metric_values['f1']
+                    }
+
+        # re-order data structure for visualization
+
+        """
+        Structure for visualization:
+        "datatype": {
+            "label": {
+                "model": {
+                    "precision": float,
+                    "recall": float,
+                    "accuracy": float,
+                    "f1": float
+                }
+            }
+        }
+        """
+
+        results_dt_label_model_micro = {}
+        for model in results:
+            for datatype in results[model]:
+                if datatype not in results_dt_label_model_micro:
+                    results_dt_label_model_micro[datatype] = {}
+                
+                for label in results[model][datatype]:
+                    if label not in results_dt_label_model_micro[datatype]:
+                        results_dt_label_model_micro[datatype][label] = {}
+                    
+                    results_dt_label_model_micro[datatype][label][model] = results[model][datatype][label]
+                
+        return results_dt_label_model_micro
+    
+    @staticmethod
+    def metric_visualization(results_dt_label_model):
+
+        metrics = ['precision', 'recall', 'accuracy', 'f1']
+
+        # Count subplots
+        total_plots = sum(len(results_dt_label_model[dt]) for dt in results_dt_label_model)
+        ncols = 3
+        nrows = (total_plots + ncols - 1) // ncols
+
+        fig, axes = plt.subplots(nrows, ncols, figsize=(18, 5*nrows))
+        if isinstance(axes, np.ndarray):
+            axes = axes.flatten()
+        else:
+            axes = [axes]
+
+        plot_idx = 0
+        for datatype in sorted(results_dt_label_model.keys()):
+            for label in sorted(results_dt_label_model[datatype].keys()):
+                ax = axes[plot_idx]
+                
+                x = np.arange(len(ML_MODELS))
+                width = 0.2
+                
+                for i, metric in enumerate(metrics):
+                    values = [results_dt_label_model[datatype][label][model][metric] for model in ML_MODELS] # metric (accuracy/precision/recall/f1) values for this label and datatype
+                    
+                    offset = (i - 1) * width
+                    bars = ax.bar(x + offset, values, width, label=metric.capitalize(), alpha=0.8)
+                    
+                    for bar in bars:
+                        height = bar.get_height()
+                        ax.text(bar.get_x() + bar.get_width()/2., height,
+                            f'{height:.2f}',
+                            ha='center', va='bottom', fontsize=8)
+                
+                ax.set_ylabel('Score')
+                ax.set_title(f'{datatype.upper()}\n{label}', fontweight='bold', fontsize=12)
+                ax.set_xticks(x)
+                ax.set_xticklabels(ML_MODELS_LABELS, rotation=45, ha='right', fontsize=9)
+                ax.legend(loc='upper left', fontsize=9)
+                ax.grid(axis='y', alpha=0.3)
+                ax.set_ylim([0, 1.05])
+                
+                plot_idx += 1
+
+        for idx in range(plot_idx, len(axes)):
+            axes[idx].set_visible(False)
+
+        plt.tight_layout()
+        os.makedirs(TRAINING_INFO_DIR, exist_ok=True)
+        plt.savefig(f'{TRAINING_INFO_DIR}/classifier_metrics_all.png', dpi=300, bbox_inches='tight')
+        plt.show()
+
+        print(f'Saved evaluation metric plots to {TRAINING_INFO_DIR}/classifier_metrics_all.png')
+
+    @staticmethod
+    def select_best_classifier(results_dt_label_model):
+        """
+        Selects best classifier based on:
+            - number of classification tasks they have highest F1
+        if multiple models are best in the same number of classification tasks:
+            - the best model is the one that has best F1 avg across all classification tasks
+        """
+
+        score_per_model = {}
+        df_data = {
+            'datatype': [],
+            'label': [],
+            'best_model': [],
+            'best_f1': []
+        }
+        
+        for datatype in results_dt_label_model:
+            for label in results_dt_label_model[datatype]:
+                best_f1 = -1
+                best_models = []
+                for model in results_dt_label_model[datatype][label]:
+                    if model not in score_per_model:
+                        score_per_model[model] = 0
+                    
+                    f1 = results_dt_label_model[datatype][label][model]['f1']
+                    
+                    print(f'Model: {model}', f'F1: {f1:.5f}', 'Datatype:', datatype, 'Label:', label)
+                    
+                    if f1 > best_f1:
+                        best_f1 = f1
+                        best_models = [model] # reset with a new best model
+                    elif f1 == best_f1: # more than 1 model has best f1
+                        best_models.append(model) 
+
+                df_data['datatype'].append(datatype)
+                df_data['label'].append(label)
+                df_data['best_model'].append(', '.join(best_models))
+                df_data['best_f1'].append(best_f1)
+                
+                for model in best_models:
+                    score_per_model[model] += 1
+
+        df = pd.DataFrame(df_data)
+
+        os.makedirs(TRAINING_INFO_DIR, exist_ok=True)
+        df.to_csv(f'{TRAINING_INFO_DIR}/best_model_per_f1_all_tasks.csv', header=0)
+        print(f'Saved best model per classification task (according to F1 score) to {TRAINING_INFO_DIR}/best_model_per_f1_all_tasks.csv')
+
+        print('Overall best model (considering only F1 score):')
+        best_score = 0
+        best_model = None
+        for model, score in score_per_model.items():
+            if score > best_score:
+                best_score = score
+                best_model = model
+            print(f'Model: {model}, Score: {score}')
+        
+        model_averages = {model: {'f1': [], 'precision': [], 'recall': [], 'accuracy': []} 
+                    for model in ML_MODELS}
+
+        for datatype in results_dt_label_model:
+            for label in results_dt_label_model[datatype]:
+                for model in ML_MODELS:
+                    model_averages[model]['f1'].append(results_dt_label_model[datatype][label][model]['f1'])
+                    model_averages[model]['precision'].append(results_dt_label_model[datatype][label][model]['precision'])
+                    model_averages[model]['recall'].append(results_dt_label_model[datatype][label][model]['recall'])
+                    model_averages[model]['accuracy'].append(results_dt_label_model[datatype][label][model]['accuracy'])
+
+
+        summary_stats = []
+        for model in ML_MODELS:
+            summary_stats.append({
+                'Model': model,
+                'Mean F1': np.mean(model_averages[model]['f1']),
+                'Mean Precision': np.mean(model_averages[model]['precision']),
+                'Mean Recall': np.mean(model_averages[model]['recall']),
+                'Mean Accuracy': np.mean(model_averages[model]['accuracy'])
+            })
+
+        df_summary = pd.DataFrame(summary_stats)
+        df_summary.to_csv(f'{TRAINING_INFO_DIR}/summary_all_models.csv', index=False)
+        print("\nModel Performance Summary (across all classification tasks):")
+        display(df_summary.to_string(index=False))
+
+        best_model_f1 = None
+        best_f1 = 0
+        for i, stats in enumerate(summary_stats):
+            if stats['Mean F1'] > best_f1:
+                best_f1 = stats['Mean F1']
+                best_model_f1 = stats['Model']
+        
+        print(f'Model with best F1 across all classification tasks is {best_model_f1} with an avg. F1 of {best_f1}')
+
+        print(f'Saved summary stats to {TRAINING_INFO_DIR}/summary_all_models.csv')
+
+        with open(f'{TRAINING_INFO_DIR}/training_info_{best_model_f1}.pkl', 'rb') as f:
+            training_info_model = pickle.load(f)
+
+        with open(f'{TRAINING_INFO_DIR}/best_model_training_info.pkl', 'wb') as f:
+            pickle.dump(training_info_model, f)
+        
+    
+    def evaluate_cross_validation(self):
+        results_dt_label_model = MLClassifier.create_data_structure_for_visualization()
+
+        MLClassifier.metric_visualization(results_dt_label_model)
+
+        MLClassifier.select_best_classifier(results_dt_label_model)
+    
+        return results_dt_label_model
+

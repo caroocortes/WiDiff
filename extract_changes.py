@@ -1,3 +1,4 @@
+import cProfile
 import os
 import time
 from argparse import ArgumentParser
@@ -14,7 +15,7 @@ import yaml
 from parser_scripts.db_writer import db_writer
 from parser_scripts.utils import create_db_schema
 from parser_scripts.file_parser import FileParser
-from parser_scripts.const import PROCESSED_FILES_PATH, CLAIMED_FILES_PATH, LOCK_FILE_PATH, SETUP_PATH
+from parser_scripts.const import PROCESSED_FILES_PATH, CLAIMED_FILES_PATH, LOCK_FILE_PATH, SETUP_PATH, LOGS_DIR
 
 with open(SETUP_PATH, 'r') as f:
     set_up = yaml.safe_load(f)
@@ -31,13 +32,13 @@ def log_file_process(file_path):
     except Exception as e:
         print(f"Error logging processed file to processed_files.txt {file_path}: {e}")
 
-def process_file(file_path, shared_queue=None):
+def process_file(file_id, file_path, shared_queue=None):
     """
     Process a single .xml.bz2 file, parse it, and log the results.
     """
     input_bz2 = os.path.basename(file_path)
 
-    file_parser = FileParser(file_path=input_bz2, set_up=set_up, shared_results_queue=shared_queue)
+    file_parser = FileParser(file_path=input_bz2, file_id=file_id, set_up=set_up, shared_results_queue=shared_queue)
     
     print(f"Processing: {file_path}")
     sys.stdout.flush()
@@ -78,10 +79,17 @@ def claim_files(available_files, num_files_to_claim):
             
             claimed_path = Path(CLAIMED_FILES_PATH)
             already_claimed = set()
+            next_file_id = 1
             if claimed_path.exists():
                 with claimed_path.open() as f:
                     for line in f:
-                        already_claimed.add(str(Path(line.strip()).resolve()))
+                        line = line.strip()
+                        if not line:
+                            continue
+                        file_path_str, _, file_id_str = line.rpartition(',')
+                        already_claimed.add(file_path_str)
+                        if file_id_str.isdigit():
+                            next_file_id = max(next_file_id, int(file_id_str) + 1)
             
             print(f"Already claimed: {len(already_claimed)} files")
 
@@ -96,10 +104,11 @@ def claim_files(available_files, num_files_to_claim):
             to_claim = unclaimed[:num_files_to_claim]
             
             with claimed_path.open('a') as f:
-                for file_path in to_claim:
-                    f.write(f"{file_path.resolve()}\n")
+                for i, file_path in enumerate(to_claim):
+                    file_id = next_file_id + i
+                    f.write(f"{file_path.resolve()},{file_id}\n")
+                    claimed_by_me.append((file_path, file_id))
             
-            claimed_by_me = to_claim
             print(f"[PID {pid}] Successfully claimed {len(claimed_by_me)} files for processing")
             
         finally:
@@ -118,6 +127,8 @@ if __name__ == "__main__":
     if not dump_dir.exists():
         print(f"The dump directory {dump_dir} doesn't exist")
         raise SystemExit(1)
+    
+    os.makedirs(LOGS_DIR, exist_ok=True)
     
     processed_log = Path(PROCESSED_FILES_PATH)
 
@@ -146,32 +157,15 @@ if __name__ == "__main__":
         if input_bz2 in processed_files:
             print(f"{input_bz2} has already been processed.")
         else:
-            # Check if the file is already claimed by another process
-            lock_file = Path(LOCK_FILE_PATH)
-            lock_file.touch(exist_ok=True)
-
-            with open(lock_file, 'r') as lock:
-                try:
-                    fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-                    
-                    claimed_path = Path(CLAIMED_FILES_PATH)
-                    already_claimed = set()
-                    if claimed_path.exists():
-                        with claimed_path.open() as f:
-                            for line in f:
-                                already_claimed.add(str(Path(line.strip()).resolve()))
-                    
-                    if str(Path(dump_dir / input_bz2).resolve()) not in already_claimed:
-                        with claimed_path.open('a') as f:
-                            f.write(f"{Path(dump_dir / input_bz2)}\n")
-                        print(f"Claimed {input_bz2} for processing")
-
-                        process_time, num_entities, file_path, size = process_file(os.path.join(dump_dir, input_bz2))
-                    else:
-                        print(f"{input_bz2} is already claimed by another process.")
-                        raise SystemExit(1)
-                finally:                    
-                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            claimed = claim_files([Path(dump_dir / input_bz2)], 1)
+            if claimed:
+                file_path, file_id = claimed[0]
+                print(f"Claimed {input_bz2} for processing with file_id={file_id}")
+                process_file(file_id, file_path, shared_queue=None)
+            else:
+                print(f"{input_bz2} is already claimed by another process.")
+                raise SystemExit(1)
+            
     else:
         all_files = [f.resolve() for f in dump_dir.iterdir() if f.is_file() and f.suffix == '.bz2']
         files_sorted = sorted(all_files, key=lambda f: f.stat().st_mtime)
@@ -221,7 +215,10 @@ if __name__ == "__main__":
                 max_workers=max_workers,
             )
             
-            futures = {executor.submit(process_file, f, shared_queue): f for f in files_to_parse}
+            futures = {
+                executor.submit(process_file, file_id, file_path, shared_queue): file_path
+                for file_path, file_id in files_to_parse
+            }
 
             for future in concurrent.futures.as_completed(futures):
                 file_path = futures[future]
@@ -256,3 +253,5 @@ if __name__ == "__main__":
                 raise Exception(f"DB writer failed!")
         
         executor.shutdown(wait=True)
+
+        

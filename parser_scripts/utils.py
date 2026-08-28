@@ -2,9 +2,7 @@ import requests
 import bz2
 from pathlib import Path
 import re
-from psycopg2.extras import execute_batch
 import psycopg2
-from math import radians, cos, sin, asin, sqrt
 from bs4 import BeautifulSoup
 import json
 import hashlib
@@ -17,8 +15,11 @@ import os
 import pandas as pd
 import os
 import psutil
+import nltk
+from nltk.corpus import stopwords
+import unicodedata
 
-from parser_scripts.const import WIKIDATA_SERVICE_URL, DOWNLOAD_LINKS_FILE_PATH
+from parser_scripts.const import WIKIDATA_SERVICE_URL, DOWNLOAD_LINKS_FILE_PATH, WD_STRING_TYPES, WD_ENTITY_TYPES, ALL_DATATYPES, STOP_WORDS
 
 def total_memory_usage():
     """Get total memory including all child processes in MB"""
@@ -46,107 +47,6 @@ def get_time_unit(elapsed_time):
         return elapsed_time / 60, 'minutes'
     else:
         return elapsed_time, 'seconds'
-
-"""
-    Helper methods for magnitude of change calculation
-"""
-def haversine_metric(lon1, lat1, lon2, lat2):
-    """
-    Calculate the great circle distance in kilometers between two points 
-    on the earth (specified in decimal degrees)
-    """
-    # convert decimal degrees to radians 
-    lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
-
-    # haversine formula 
-    dlon = lon2 - lon1 
-    dlat = lat2 - lat1 
-    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
-    c = 2 * asin(sqrt(a)) 
-    r = 6371 # Radius of earth in kilometers.
-    return c * r
-
-def to_astronomical(year):
-    """
-        From Wikidata documentation:
-        Years BCE are represented as negative numbers, using the historical numbering, 
-        in which year 0 is undefined, and the year 1 BCE is represented as -0001, the year 44 BCE is represented as -0044, etc., 
-        like XSD 1.0 (ISO 8601:1988) does.
-
-        From BCE to astronomical:
-        - Subtract one from the BCE year and prepend a negative sign (e.g. 1 BCE -> 0, 2 BCE -> -1, 10 BCE -> -9, and 100 BCE -> -99)
-        Since Wikidata stores BCE as negative numbers, we need to add 1 if the year is negative:
-    """
-
-    if year < 0:
-        return year + 1  # convert historical BCE to astronomical
-    return year
-
-def gregorian_to_julian(y, month, day):
-    """
-        See https://en.wikipedia.org/wiki/Julian_day for formula
-    """
-    year = to_astronomical(y)
-
-    m_14_12 = (month - 14) // 12
-
-    A = (1461 * (year + 4800 + m_14_12) ) // 4
-    B = (367 * (month - 2 - 12 * m_14_12) ) // 12
-    C = (3 * ( (year + 4900 + m_14_12) // 100)) // 4
-
-    return A + B - C + day - 32075
-
-def get_time_dict(timestring):
-
-    STANDARD_DATE_REGEX = re.compile(
-        r"""
-        (?P<year>[+-]?\d+?)-
-        (?P<month>\d\d)-
-        (?P<day>\d\d)T
-        (?P<hour>\d\d):
-        (?P<minute>\d\d):
-        (?P<second>\d\d)Z?""",
-        re.VERBOSE,
-    )
-
-    datetime_dict = {}
-    match = STANDARD_DATE_REGEX.fullmatch(timestring)
-    if match:
-        datetime_dict = {
-            "year": int(match.group("year")), # year already has the sign
-            "month": int(match.group("month")),
-            "day": int(match.group("day")),
-            "hour": int(match.group("hour")),
-            "minute": int(match.group("minute")),
-            "second": int(match.group("second")),
-        }
-
-    return datetime_dict
-
-    
-"""
-    Methods for inserting in DB
-"""
-
-def update_entity_label(conn, entity_id, entity_label):
-    """
-    Update entity_label in the entity table.
-    
-    :param conn: psycopg2 connection
-    """
-
-    query = """
-        UPDATE revision
-        SET entity_label = %s
-        WHERE entity_id = %s
-    """
-    try:
-        with conn.cursor() as cur:
-            cur.execute(query, (entity_label, entity_id))
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        print(f"Update of label ({entity_label}) for entity {entity_id} failed: {e}")
 
 def insert_rows_copy(conn, table_name, rows, columns, conflict_column=None):
     """
@@ -240,44 +140,23 @@ def insert_rows_copy(conn, table_name, rows, columns, conflict_column=None):
         cursor.close()
         buffer.close()
 
-    
-def insert_rows(conn, table_name, rows, columns):
-    if not rows:
-        return
-    
-    cursor = conn.cursor()
-    
-    try:
-        placeholders = ', '.join(['%s'] * len(columns))
-        column_names = ', '.join(columns)
-        query = f"INSERT INTO {table_name} ({column_names}) VALUES ({placeholders})"
-        
-        cursor.executemany(query, rows)
-        conn.commit()
-        
-    except Exception as e:
-        conn.rollback()
-        print(f"Insert failed for {table_name}: {e}")
-        print(f"Sample row: {rows[0]}")
-        print(f"Columns: {columns}")
-        raise
-    finally:
-        cursor.close()
 
 def create_db_schema(set_up):
     base_dir = Path(__file__).resolve().parent.parent
     
     change_extraction_filters = set_up['change_extraction_filters']
 
-    change_schema_file_path = f"{base_dir}/sql/change_schema.sql"
-    features_file_path = f"{base_dir}/sql/features_schema.sql"
-    datatype_metadata_file_path = f"{base_dir}/sql/datatype_metadata_schema.sql"
+    re_interpretation = set_up.get('re_interpretation', False)
+
+    change_schema_file_path = f"{base_dir}/table_schemas/change_schema.sql"
+    updates_file_path = f"{base_dir}/table_schemas/updates_schema.sql"
+    datatype_metadata_file_path = f"{base_dir}/table_schemas/datatype_metadata_schema.sql"
     
     with open(change_schema_file_path, "r", encoding="utf-8") as f:
         change_schema_template = f.read()
 
-    with open(features_file_path, "r", encoding="utf-8") as f:
-        features_file_template = f.read()
+    with open(updates_file_path, "r", encoding="utf-8") as f:
+        updates_file_template = f.read()
 
     with open(datatype_metadata_file_path, "r", encoding="utf-8") as f:
         datatype_metadata_schema_template = f.read()
@@ -285,9 +164,9 @@ def create_db_schema(set_up):
     base_query = change_schema_template.replace("{suffix}", "")
 
     filters_rest = change_extraction_filters.get('rest', {})
-    if filters_rest.get('feature_extraction', False):
+    if re_interpretation:
         # load schema for rest features
-        query_fe_rest = features_file_template.replace("{suffix}", "")
+        query_fe_rest = updates_file_template.replace("{suffix}", "")
         base_query += "\n" + query_fe_rest
 
     if filters_rest.get('datatype_metadata_extraction', False):
@@ -304,9 +183,9 @@ def create_db_schema(set_up):
         query_sa = change_schema_template.replace("{suffix}", "_sa")
         base_query += "\n" + query_sa
 
-        if filters_sa.get('feature_extraction', False):
+        if re_interpretation:
             # load feature extraction schema for scholarly articles
-            query_fe_sa = features_file_template.replace("{suffix}", "_sa")
+            query_fe_sa = updates_file_template.replace("{suffix}", "_sa")
             base_query += "\n" + query_fe_sa
 
         if filters_sa.get('datatype_metadata_extraction', False):
@@ -323,8 +202,9 @@ def create_db_schema(set_up):
         query_ao = change_schema_template.replace("{suffix}", "_ao")
         base_query += "\n" + query_ao
 
-        if filters_ao.get('feature_extraction', False):
-            query_fe_ao = features_file_template.replace("{suffix}", "_ao")
+        if re_interpretation:
+            # load feature extraction schema for astronomical objects
+            query_fe_ao = updates_file_template.replace("{suffix}", "_ao")
             base_query += "\n" + query_fe_ao
 
         if filters_ao.get('datatype_metadata_extraction', False):
@@ -341,8 +221,9 @@ def create_db_schema(set_up):
         query_less = change_schema_template.replace("{suffix}", "_less")
         base_query += "\n" + query_less
 
-        if filters_less.get('feature_extraction', False):
-            query_fe_less = features_file_template.replace("{suffix}", "_less")
+        if re_interpretation:
+            # load feature extraction schema for less
+            query_fe_less = updates_file_template.replace("{suffix}", "_less")
             base_query += "\n" + query_fe_less
 
         if filters_less.get('datatype_metadata_extraction', False):
@@ -350,9 +231,31 @@ def create_db_schema(set_up):
             query_dm_less = datatype_metadata_schema_template.replace("{suffix}", "_less")
             base_query += "\n" + query_dm_less
 
+    enum_query = f"""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'action_enum') THEN
+                CREATE TYPE action_enum AS ENUM ('CREATE', 'UPDATE', 'DELETE');
+            END IF;
+        END$$;
+
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'datatype_enum') THEN
+                CREATE TYPE datatype_enum AS ENUM ({', '.join(f"'{dt}'" for dt in ALL_DATATYPES)});
+            END IF;
+        END$$;
+
+        CREATE TABLE IF NOT EXISTS file_paths (
+            file_id INT PRIMARY KEY,
+            file_path TEXT
+        );
+    """
+
     try:
         script_dir = Path(__file__).parent
-        db_config_path = script_dir.parent / set_up.get("db_config_path", "config/db_config.json")
+        db_config_path = script_dir.parent / set_up.get("database_config_path", "config/db_config.json")
+        print('DB CONFIG PATH:', db_config_path, flush=True)
         with open(db_config_path) as f:
             config = json.load(f)
 
@@ -366,6 +269,10 @@ def create_db_schema(set_up):
 
         cursor = conn.cursor()
 
+        cursor.execute(query=enum_query)
+
+        conn.commit()
+
         cursor.execute(query=base_query)
 
         conn.commit()
@@ -377,7 +284,6 @@ def create_db_schema(set_up):
 
 
 """ Other utility methods """
-
 def human_readable_size(size, decimal_places=2):
     for unit in ['B','KB','MB','GB','TB']:
         if size < 1024:
@@ -461,6 +367,7 @@ def get_time_feature(timestamp, option='year'):
 
 
 def query_to_df(conn, query):
+    
     try:
         with conn.cursor() as cur:
             cur.execute(query)
@@ -477,3 +384,99 @@ def query_to_df(conn, query):
                 return pd.DataFrame()
     except Exception as e:
         raise e
+    
+
+
+def generate_stopwords():
+    """
+    Generates a frozen set of English stopwords from NLTK and prints it in a format suitable for inclusion in code.
+    """
+    nltk.download("stopwords")
+
+    words = sorted(stopwords.words("english"))
+    print('SAVE TO const.py')
+    print(words)
+
+
+def has_adjacent_swap(old, new):
+    """
+        Check if two strings differ by an adjacent character swap
+        e.g. "tent" vs "tetn" -> return 1
+    """
+    if len(old) != len(new):
+        # different length -> there's a char addition or deletion
+        return 0
+    
+    diffs = []
+    for i in range(len(old)):
+        # get charactes that differ in order
+        if old[i] != new[i]:
+            diffs.append(i)
+        # old: caro old[2]=r old[3]=o
+        # new: caor new[2]=o new[3]=r
+        # diffs = [2,3]
+
+    if len(diffs) == 2:
+        i, j = diffs
+        # check the difference is adjacent (j = i+1) and swapped
+        if j == i + 1 and old[i] == new[j] and old[j] == new[i]:
+            return 1
+    return 0
+
+def strip_accents(text):
+    """'Varejão' -> 'Varejao', 'José' -> 'Jose'."""
+    return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
+
+def plural_forms(word):
+    """Given a word assumed singular, return the set of forms it could
+    plausibly pluralize to for English rules:
+    - most nouns: +s                     (cat -> cats)
+    - ends in s/x/z/ch/sh: +es           (bus -> buses, box -> boxes)
+    - ends in consonant+y: y -> ies      (baby -> babies, city -> cities)
+    - ends in vowel+y: +s                (boy -> boys - covered by the +s rule above)
+    - ends in f: f -> ves                (leaf -> leaves)
+    - ends in fe: fe -> ves              (knife -> knives)
+
+    NOTE: there can be "wrong" cases like buss, but buses will also be there and we check if the other word
+    is in the set so it's ok
+    """
+
+    VOWELS = set("aeiou")
+    forms = {word + "s"}
+    if word.endswith(("s", "x", "z", "ch", "sh")):
+        forms.add(word + "es")
+    if len(word) > 1 and word[-1] == "y" and word[-2] not in VOWELS:
+        forms.add(word[:-1] + "ies")
+    if word.endswith("f"):
+        forms.add(word[:-1] + "ves")
+    if word.endswith("fe"):
+        forms.add(word[:-2] + "ves")
+    return forms
+
+def is_plural_pair(w1, w2):
+    """True if w1/w2 are the same word differing only by pluralization,
+    checked in both directions."""
+
+    if w1 == w2:
+        return False
+    return w2 in plural_forms(w1) or w1 in plural_forms(w2)
+
+def normalize_for_residual(text):
+    """Strips accents, case, and every non-alphanumeric character
+    (including whitespace) - used to compute a 'residual' edit
+    distance that isolates real content changes from pure
+    formatting noise (case/punctuation/whitespace/accents)."""
+
+    text = strip_accents(text).lower()
+    return ''.join(c for c in text if c.isalnum() or c.isspace())
+
+def strip_stopwords(value):
+    """Removes stopword tokens in place from the original string"""
+
+    STOPWORD_PATTERN = re.compile(
+        r'\b(' + '|'.join(re.escape(w) for w in STOP_WORDS) + r')\b',
+        re.IGNORECASE
+    )
+    new_value, n_subs = STOPWORD_PATTERN.subn('', value)
+    new_value = re.sub(r'\s+', ' ', new_value).strip()
+    return new_value, n_subs > 0

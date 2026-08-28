@@ -6,6 +6,7 @@ import psycopg2
 import queue
 from pathlib import Path
 import gc
+import os
 
 from parser_scripts.const import *
 from parser_scripts.utils import insert_rows_copy
@@ -15,19 +16,19 @@ def batch_insert(conn, batch, set_up, table_suffix=''):
 
     change_extraction_filters = set_up.get('change_extraction_filters', {})
     if table_suffix == '_ao':
-        extract_features = change_extraction_filters.get('astronomical_objects_filter', {}).get('feature_extraction', False) and change_extraction_filters.get('astronomical_objects_filter', {}).get('extract', False)
+        re_interpretation = set_up.get('re_interpretation', False) and change_extraction_filters.get('astronomical_objects_filter', {}).get('extract', False)
         extract_datatype_metadata_changes = change_extraction_filters.get('astronomical_objects_filter', {}).get('datatype_metadata_extraction', False) and change_extraction_filters.get('astronomical_objects_filter', {}).get('extract', False)
 
     if table_suffix == '_sa':
-        extract_features = change_extraction_filters.get('scholarly_articles_filter', {}).get('feature_extraction', False) and change_extraction_filters.get('scholarly_articles_filter', {}).get('extract', False)
+        re_interpretation = set_up.get('re_interpretation', False) and change_extraction_filters.get('scholarly_articles_filter', {}).get('extract', False)
         extract_datatype_metadata_changes = change_extraction_filters.get('scholarly_articles_filter', {}).get('datatype_metadata_extraction', False) and change_extraction_filters.get('scholarly_articles_filter', {}).get('extract', False)
 
     if table_suffix == '_less':
-        extract_features = change_extraction_filters.get('less_filter', {}).get('feature_extraction', False) and change_extraction_filters.get('less_filter', {}).get('extract', False)
+        re_interpretation = set_up.get('re_interpretation', False) and change_extraction_filters.get('less_filter', {}).get('extract', False)
         extract_datatype_metadata_changes = change_extraction_filters.get('less_filter', {}).get('datatype_metadata_extraction', False) and change_extraction_filters.get('less_filter', {}).get('extract', False)
 
     if table_suffix == '':
-        extract_features = change_extraction_filters.get('rest', {}).get('feature_extraction', False) # rest is extracted by default
+        re_interpretation = set_up.get('re_interpretation', False)
         extract_datatype_metadata_changes = change_extraction_filters.get('rest', {}).get('datatype_metadata_extraction', False)
 
     try:
@@ -36,6 +37,9 @@ def batch_insert(conn, batch, set_up, table_suffix=''):
         
         if len(batch['value_change']) > 0:
             insert_rows_copy(conn, f'value_change{table_suffix}', batch['value_change'], VALUE_CHANGE_COLS, VALUE_CHANGE_PK)
+            
+        if len(batch['rank_change']) > 0:
+            insert_rows_copy(conn, f'rank_change{table_suffix}', batch['rank_change'], RANK_CHANGE_COLS, RANK_CHANGE_PK)
             
         if len(batch['qualifier_change']) > 0:
             insert_rows_copy(conn, f'qualifier_change{table_suffix}', batch['qualifier_change'], QUALIFIER_CHANGE_COLS, QUALIFIER_CHANGE_PK)
@@ -46,24 +50,12 @@ def batch_insert(conn, batch, set_up, table_suffix=''):
         if extract_datatype_metadata_changes and len(batch['datatype_metadata_change']) > 0:
             insert_rows_copy(conn, f'datatype_metadata_change{table_suffix}', batch['datatype_metadata_change'], DATATYPE_METADATA_CHANGE_COLS, DATATYPE_METADATA_CHANGE_PK)
         
-        if extract_features:
-            if len(batch['features_entity']) > 0:
-                insert_rows_copy(conn, f'features_entity{table_suffix}', batch['features_entity'], ENTITY_FEATURE_COLS, ENTITY_FEATURE_PK)
+        if re_interpretation:
+            if len(batch['updates_entity']) > 0:
+                insert_rows_copy(conn, f'updates_entity{table_suffix}', batch['updates_entity'], ENTITY_UPDATES_COLS, ENTITY_UPDATES_PK)
         
-            if len(batch['features_text']) > 0:
-                insert_rows_copy(conn, f'features_text{table_suffix}', batch['features_text'], TEXT_FEATURE_COLS, TEXT_FEATURE_PK)
-        
-            if len(batch['features_time']) > 0:
-                insert_rows_copy(conn, f'features_time{table_suffix}', batch['features_time'], TIME_FEATURE_COLS, TIME_FEATURE_PK)
-        
-            if len(batch['features_globecoordinate']) > 0:
-                insert_rows_copy(conn, f'features_globecoordinate{table_suffix}', batch['features_globecoordinate'], GLOBE_FEATURE_COLS, GLOBE_FEATURE_PK)
-        
-            if len(batch['features_quantity']) > 0:
-                insert_rows_copy(conn, f'features_quantity{table_suffix}', batch['features_quantity'], QUANTITY_FEATURE_COLS, QUANTITY_FEATURE_PK)
-        
-        # if extract_features and len(batch['features_property_replacement']) > 0:
-        #     insert_rows_copy(conn, f'features_property_replacement{table_suffix}', batch['features_property_replacement'], PROPERTY_REPLACEMENT_FEATURE_COLS, PROPERTY_REPLACEMENT_PK)
+            if len(batch['updates_text']) > 0:
+                insert_rows_copy(conn, f'updates_text{table_suffix}', batch['updates_text'], TEXT_UPDATES_COLS, TEXT_UPDATES_PK)
         
         if len(batch['entity_stats']) > 0:
             insert_rows_copy(conn, f'entity_stats{table_suffix}', batch['entity_stats'], ENTITY_STATS_COLS, ENTITY_STATS_PK)
@@ -108,16 +100,12 @@ def db_writer(set_up, num_workers, results_queue):
     base_table_names = [
         'revision',
         'value_change',
+        'rank_change',
         'qualifier_change',
         'reference_change',
         'datatype_metadata_change',
-        'features_entity',
-        'features_text',
-        'features_time',
-        'features_globecoordinate',
-        'features_quantity',
-        'features_reverted_edit',
-        # 'features_property_replacement',
+        'updates_entity',
+        'updates_text',
         'entity_stats'
     ]
 
@@ -131,12 +119,26 @@ def db_writer(set_up, num_workers, results_queue):
     workers_finished = 0
     last_write = time.time()
 
+    # time spent blocked on results_queue.get() with nothing to consume
+    # (large -> workers/files aren't producing fast enough, writer is starved)
+    idle_time = 0.0
+    # time spent actually inserting into Postgres
+    busy_time = 0.0
+    total_rows_written = 0
+    num_batch_inserts = 0
+    last_status_report = time.time()
+    status_report_interval = 30
+
+    batch_size = set_up.get('change_extraction_processing', {}).get('db_batch_size', 5000)
+
     try:
         while workers_finished < num_workers:
             try:
 
+                get_start = time.time()
                 result = results_queue.get(timeout=60)
-                
+                idle_time += time.time() - get_start
+
                 if result is None:
                     # Worker finished
                     workers_finished += 1
@@ -161,10 +163,17 @@ def db_writer(set_up, num_workers, results_queue):
                 
                 current_batch_size = len(batches[table_suffix]['revision'])
                 time_since_write = time.time() - last_write
-                batch_size = set_up.get('change_extraction_processing', {}).get('db_batch_size', 5000)
+                
                 if len(batches[table_suffix]['revision']) >= batch_size or (time_since_write > 15 and current_batch_size > 0):
 
+                    insert_start = time.time()
                     batch_insert(conn, batches[table_suffix], set_up, table_suffix=table_suffix)
+                    insert_elapsed = time.time() - insert_start
+                    busy_time += insert_elapsed
+                    num_batch_inserts += 1
+                    total_rows_written += current_batch_size
+                    log(f"[DB_WRITER] Wrote batch{table_suffix or ''}: {current_batch_size} revisions in "
+                        f"{insert_elapsed:.2f}s ({current_batch_size / insert_elapsed if insert_elapsed > 0 else 0:.0f} rows/s)")
 
                     # Clear this batch
                     for table in batches[table_suffix]:
@@ -172,21 +181,45 @@ def db_writer(set_up, num_workers, results_queue):
 
                     last_write = time.time()
 
+                if time.time() - last_status_report > status_report_interval:
+                    try:
+                        qsize = results_queue.qsize()
+                    except NotImplementedError:
+                        qsize = -1  # not supported on this platform
+                    log(f"[DB_WRITER] Status: {num_batch_inserts} batches / {total_rows_written} rows written so far, "
+                        f"busy(inserting)={busy_time:.1f}s idle(waiting on queue)={idle_time:.1f}s, "
+                        f"queue backlog~{qsize}, workers finished={workers_finished}/{num_workers}")
+                    last_status_report = time.time()
+
                 gc.collect(generation=0)
-                
+
             except queue.Empty:
+                idle_time += 60  # the get() timeout that just elapsed
                 log(f"[DB_WRITER] Queue empty timeout - flushing batches")
                 for suffix, batch in batches.items():
                     if any(len(v) > 0 for v in batch.values()):
+                        rows = len(batch['revision'])
+                        insert_start = time.time()
                         batch_insert(conn, batch, set_up, table_suffix=suffix)
+                        insert_elapsed = time.time() - insert_start
+                        busy_time += insert_elapsed
+                        num_batch_inserts += 1
+                        total_rows_written += rows
+                        log(f"[DB_WRITER] Flushed batch{suffix or ''}: {rows} revisions in {insert_elapsed:.2f}s")
                         for table in batch:
                             batch[table] = []
-    
+
         for suffix, batch in batches.items():
             if any(len(v) > 0 for v in batch.values()):
+                rows = len(batch['revision'])
+                insert_start = time.time()
                 batch_insert(conn, batch, set_up, table_suffix=suffix)
-        
-        log(f"[DB_WRITER] Completed successfully")
+                busy_time += time.time() - insert_start
+                num_batch_inserts += 1
+                total_rows_written += rows
+
+        log(f"[DB_WRITER] Completed successfully - {num_batch_inserts} batches, {total_rows_written} rows written, "
+            f"busy(inserting)={busy_time:.1f}s idle(waiting on queue)={idle_time:.1f}s")
 
     except Exception as e:
         log(f'Error in DB writer: {e}')

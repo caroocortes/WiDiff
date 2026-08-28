@@ -10,5 +10,8 @@ logs/*
 !logs/experiment_results.csv
 !logs/parser_log_files.csv
 !logs/metrics.ipynb
+logs_new/
+logs/
 slurm_wrapper.slurm
 /auxiliary_data/transitive_closures/*
+/config/db_config.json

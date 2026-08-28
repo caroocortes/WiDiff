@@ -118,7 +118,7 @@ Activate your Python environment with the dependencies from requirements.txt bef
 Run the parser with the following command:
 
 ```bash
-python3 -m main [options]
+python3 -m extract_changes [options]
 ```
 
 **Options:**
@@ -135,10 +135,10 @@ chmod +x run_parser.sh
 ./run_parser.sh <NUM_FILES> &
 ```
 
-*Note:* `run_parser.sh` runs `main.py` with the configuration set in `setup.yml` until `NUM_FILES` files have been processed.
+*Note:* `run_parser.sh` runs `extract_changes.py` with the configuration set in `setup.yml` until `NUM_FILES` files have been processed.
 
 ### Parallelization
-By default, main.py uses the following parallelization strategy:
+By default, extract_changes.py uses the following parallelization strategy:
 - Creates *files_in_parallel* processes (from set_up.yml) that call FileParser (*file_parser.py*)
 - Each FileParser creates *pages_in_parallel* processes (from set_up.yml) to call PageParser (*page_parser.py*) which processes a page (all revisions for an entity).
 - Creates a dedicated process for storing changes while they wait for batch insertion into the DB (*db_writer.py*)
