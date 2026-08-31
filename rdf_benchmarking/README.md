@@ -16,6 +16,7 @@ The experiments were run in an HPC cluster with the following resources for both
 ## Prerequisites
 
 - Install all dependencies from the requirements.txt in the root repo.
+- Download data from [Wikidata changes for RDF vs RDB benchmark](https://doi.org/10.5281/zenodo.22207667) and put *data/* directory inside *wikidata-edit-history/rdf_benchmarking/*
 
 ## 1. Configure connection settings
 

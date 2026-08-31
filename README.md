@@ -1,20 +1,23 @@
 # WiDiff - Change Extraction and Exploration in Wikidata
 
-This tool extracts changes (diff between revisions) of statement values, ranks, qualifiers, and references, from WD's xml dumps and stores them in a relational DB.
+This tool extracts changes (diff between revisions) of statement values, ranks, qualifiers, and references, from Wikidata's xml dumps and stores them in a relational DB.
+
+Additionally, this tool was extended to classify changes using a defined change type taxonomy, with rule-based and ML classifiers, as described in [Change classification](#change-classification).
 
 This README is structured as follows:
-
 - [Change extraction](#change-extraction): change extraction prerequisites and configuration parameters.
 - [Running WiDiff](#running-widiff): explains how to run the extraction pipeline.
 - [Databse schema](#database-schema): database schema description and diagram (includes change schema and feature tables).
 - [Change classification](#change-classification): 
   - [Change classification framework and change type taxonomy](#change-classification-framework-and-change-type-taxonomy): Describes the change classification framework and change type taxonomy
   - [ML model training](#ml-model-training): describes how to re-train models if needed and provides links to trained models.
-  - []
-- [Downloading extra data](): explaines how to download extra data (e.g., labels and descriptions for all entities).
+  - [LLM baseline](#llm-baseline): describes how to run the LLM baseline
+  - [Classification of remaining changes (Text and Entity)](#classification-of-remaining-changes-text-and-entity): describes how to classify remaining changes (those that weren't classified by rule-based classifiers).
+- [Descriptive Analysis -- TODO: Needs UPDATING](#descriptive-analysis): instructions on how to re-run the analysis.
+- [Downloading extra data](#downloading-extra-data): explaines how to download extra data (e.g., transitive closures).
 - [Transitive Closure Cache Creation](#transitive-closure-cache-creation): instructions on how to create the transitive closure cache from the .csv files obtained in [Downloading extra data](#downloading-extra-data).
-- [Compute Remaining Features](#compute-remaining-features): instructions on how to compute remaining features for change type classification.
-- [Descriptive Analysis](#descriptive-analysis): instructions on how to re-run the analysis.
+
+**To reproduce the comparison of RDF and Relational DB storage read *wikidata-edit-history/rdf_benchmarking/README.md*.**
 
 ## Project structure
 ```bash
@@ -584,7 +587,7 @@ python3 -m classify_remaining_changes
 
 this command classifies entity changes using rule-based first, and then classifies the remaining entity and text changes using the trained ML model.
 
-## Descriptive Analysis -- TODO: Needs UPDATING
+## Descriptive Analysis
 Descriptive analysis scripts are provided in `analysis/scripts.py`. Each analysis can be enabled and configured independently in `setup.yml` under the `analysis` section:
 
 ```yaml
