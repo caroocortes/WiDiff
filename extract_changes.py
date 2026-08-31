@@ -12,7 +12,6 @@ import multiprocessing as mp
 import gc
 import yaml
 
-from parser_scripts.db_writer import db_writer
 from parser_scripts.utils import create_db_schema
 from parser_scripts.file_parser import FileParser
 from parser_scripts.const import PROCESSED_FILES_PATH, CLAIMED_FILES_PATH, LOCK_FILE_PATH, SETUP_PATH, LOGS_DIR
@@ -32,13 +31,13 @@ def log_file_process(file_path):
     except Exception as e:
         print(f"Error logging processed file to processed_files.txt {file_path}: {e}")
 
-def process_file(file_id, file_path, shared_queue=None):
+def process_file(file_id, file_path):
     """
     Process a single .xml.bz2 file, parse it, and log the results.
     """
     input_bz2 = os.path.basename(file_path)
 
-    file_parser = FileParser(file_path=input_bz2, file_id=file_id, set_up=set_up, shared_results_queue=shared_queue)
+    file_parser = FileParser(file_path=input_bz2, file_id=file_id, set_up=set_up)
     
     print(f"Processing: {file_path}")
     sys.stdout.flush()
@@ -161,7 +160,7 @@ if __name__ == "__main__":
             if claimed:
                 file_path, file_id = claimed[0]
                 print(f"Claimed {input_bz2} for processing with file_id={file_id}")
-                process_file(file_id, file_path, shared_queue=None)
+                process_file(file_id, file_path)
             else:
                 print(f"{input_bz2} is already claimed by another process.")
                 raise SystemExit(1)
@@ -199,27 +198,17 @@ if __name__ == "__main__":
         
         print(f"Starting shared db_writer expecting {total_workers} workers")
         
-        # Create shared queue
-        shared_queue = mp.Manager().Queue(maxsize=set_up.get('change_extraction_processing', {}).get('db_max_queue_size', 10000))
-        
-        # Start shared db_writer
-        db_writer_process = mp.Process(
-            target=db_writer,
-            args=(set_up, total_workers, shared_queue)
-        )
-        db_writer_process.start()
 
         try:
 
             executor = concurrent.futures.ProcessPoolExecutor(
                 max_workers=max_workers,
             )
-            
-            futures = {
-                executor.submit(process_file, file_id, file_path, shared_queue): file_path
-                for file_path, file_id in files_to_parse
-            }
 
+            futures = {}
+            for file_path, file_id in files_to_parse:
+                futures[executor.submit(process_file, file_id, file_path)] =  file_path
+                
             for future in concurrent.futures.as_completed(futures):
                 file_path = futures[future]
                 try:
@@ -246,11 +235,6 @@ if __name__ == "__main__":
             print(f"Fatal error in processing: {e}", flush=True)
             print(traceback.format_exc(), flush=True)
             executor.shutdown(wait=True)
-        finally:
-            print("Waiting for db_writer to finish")
-            db_writer_process.join()
-            if db_writer_process.exitcode != 0:
-                raise Exception(f"DB writer failed!")
         
         executor.shutdown(wait=True)
 

@@ -17,7 +17,8 @@ import gc
 from collections import namedtuple
 
 import cProfile
-import pstats
+
+import subprocess
 
 from parser_scripts.page_parser import PageParser
 from parser_scripts.const import *
@@ -43,9 +44,9 @@ PageData = namedtuple('PageData', [
 ])
 
 
-def process_page_xml(page_elem_str, file_id, set_up, astronomical_object_types, scholarly_article_types):
+def process_page_xml(page_data, file_id, set_up, astronomical_object_types, scholarly_article_types):
     
-    parser = PageParser(file_id=file_id, page_elem_str=page_elem_str, set_up=set_up, 
+    parser = PageParser(file_id=file_id, page_data=page_data, set_up=set_up, 
                         astronomical_object_types=astronomical_object_types, scholarly_article_types=scholarly_article_types)
     try:
         results = parser.process_page()
@@ -57,7 +58,7 @@ def process_page_xml(page_elem_str, file_id, set_up, astronomical_object_types, 
         raise e
 
 class FileParser():
-    def __init__(self, file_path=None, file_id=None, set_up=None, shared_results_queue=None):
+    def __init__(self, file_path=None, file_id=None, set_up=None):
         self.set_up = set_up
         self.file_path = file_path
         self.file_id = file_id
@@ -89,18 +90,13 @@ class FileParser():
         # START TIME
         self.start_time = time.time()
 
-        if shared_results_queue is not None:
-            self.results_queue = shared_results_queue
-            self.owns_writer = False
-        else:
-            # Fallback for single-file mode
-            self.results_queue = mp.Queue()
-            self.writer_process = mp.Process(target=db_writer, args=(self.set_up, self.num_workers, self.results_queue))
-            self.writer_process.start()
-            self.owns_writer = True
+        # RESULTS QUEUE FOR DB WRITER
+        self.results_queue = mp.Queue(maxsize=set_up.get('change_extraction_processing', {}).get('db_max_queue_size', 10000))
+        self.writer_process = mp.Process(target=db_writer, args=(self.set_up, self.num_workers, self.results_queue))
+        self.writer_process.start()
         
+        # QUEUE FOR PAGES TO BE PROCESSED BY WORKERS
         self.queue_size = self.set_up.get('change_extraction_processing', {}).get('page_queue_size', 10000)
-        
         self.page_queue = mp.Queue(maxsize=self.queue_size) # queue that stores pages as they are read
         self.stop_event = mp.Event()
 
@@ -176,59 +172,31 @@ class FileParser():
         
         pages_processed = 0
 
-        # time spent blocked waiting for a page to show up in page_queue
-        # (empty -> reader/upstream is the bottleneck, worker is starved)
-        idle_time = 0.0
-        # time spent actually parsing + classifying a page
-        busy_time = 0.0
-        # time spent blocked handing results off to the shared results_queue
-        # (large -> db_writer can't keep up, this worker - and every other
-        # worker/file sharing that same writer - is being throttled by it)
-        writer_blocked_time = 0.0
-        last_report = time.time()
-        report_interval = self.set_up.get('change_extraction_processing', {}).get('progress_report_interval_sec', 30)
-
-        # profiler = cProfile.Profile()
-        # profiler.enable()
-
         try:
 
             while not self.stop_event.is_set() or not self.page_queue.empty():
-                get_start = time.time()
-                try:
-                    page_elem_str = self.page_queue.get(timeout=1) # get is atomic -  only one thread can remove an item at a time
-                except queue.Empty:
-                    idle_time += time.time() - get_start
-                    continue
-                idle_time += time.time() - get_start
 
-                if page_elem_str is None:  # no more pages to process
+                try:
+                    page_data = self.page_queue.get(timeout=1) # get is atomic -  only one thread can remove an item at a time
+                except queue.Empty:
+                    continue
+
+                if page_data is None:  # no more pages to process
                     break
 
-                process_start = time.time()
                 results = process_page_xml(
-                    page_elem_str,
+                    page_data,
                     self.file_id,
                     self.set_up,
                     self.ASTRONOMICAL_OBJECT_TYPES,
                     self.SCHOLARLY_ARTICLE_TYPES
                 )
-                busy_time += time.time() - process_start
 
                 pages_processed += 1
 
                 if results is not None:
                     
-                    queue_size = self.results_queue.qsize()
-                    print(f"[Worker {worker_id}] Putting results for page {pages_processed} into results_queue (size={queue_size})", flush=True)
-                    put_start = time.time()
                     self.results_queue.put(results)
-                    end_put = time.time()
-                    writer_blocked_time += end_put - put_start
-                    
-                    put_time = end_put - put_start
-                    if put_time > 0.01: 
-                        print(f"Slow put: {put_time:.3f}s, queue_size={queue_size}", flush=True)
 
                     if len(results.get('revision', [])) > 100000:
                         gc.collect()
@@ -237,12 +205,6 @@ class FileParser():
 
                 if pages_processed % 10000 == 0:  # Every 10000 entities or with more than 100000 revisions
                     gc.collect()
-
-                if time.time() - last_report > report_interval:
-                    print(f"[Worker {worker_id}] {pages_processed} pages so far | "
-                          f"busy(parse+classify)={busy_time:.1f}s idle(no pages available)={idle_time:.1f}s "
-                          f"blocked(handing off to db_writer)={writer_blocked_time:.1f}s", flush=True)
-                    last_report = time.time()
 
         except MemoryError as e:
             print(f"Out of memory processing page in file {self.file_path}: {e}", flush=True)
@@ -255,19 +217,13 @@ class FileParser():
             print(traceback.format_exc(), flush=True)
         finally:
 
-            # profiler.disable()
-            # profiler.dump_stats(f'profile_worker_{worker_id}.out')
-
             self.results_queue.put(None)
 
-            print(f"Worker {worker_id} FINAL: {pages_processed} pages | "
-                  f"busy(parse+classify)={busy_time:.1f}s idle(no pages available)={idle_time:.1f}s "
-                  f"blocked(handing off to db_writer)={writer_blocked_time:.1f}s", flush=True)
+            print(f"Worker {worker_id} FINAL: {pages_processed} pages", flush=True)
             sys.stdout.flush()
 
-            if self.owns_writer:
-                self.results_queue.close()
-                self.results_queue.join_thread()
+            self.results_queue.close()
+            self.results_queue.join_thread()
 
             os._exit(0)
 
@@ -276,7 +232,7 @@ class FileParser():
         return len(page_elem_str.encode('utf-8'))
 
 
-    def extract_page_data(page_elem, ns, entity_id):
+    def extract_page_data(self, page_elem, ns, entity_id):
         """
         Extract all needed data from XML page element.
         Returns PageData or None if should skip.
@@ -320,10 +276,16 @@ class FileParser():
                 user_id=user_id
             )
             revisions.append(rev_data)
-        
+
+            del rev_elem  # free memory
+
         if not revisions:
             return None
         
+        page_elem.clear()
+        while page_elem.getprevious() is not None:
+            del page_elem.getparent()[0]
+
         return PageData(entity_id=entity_id, revisions=revisions)
 
     def parse_dump(self):
@@ -333,8 +295,6 @@ class FileParser():
         """
 
         title_tag = f"{{{NS}}}title"
-        revision_tag = f'{{{NS}}}revision'
-        revision_text_tag = f'{{{NS}}}text'
 
         ns = "http://www.mediawiki.org/xml/export-0.11/"
         page_tag = f"{{{ns}}}page"
@@ -342,86 +302,72 @@ class FileParser():
         
         try:
             dump_dir = Path(self.set_up.get('change_extraction_processing', {}).get("files_directory", ''))
-            with bz2.open(dump_dir / Path(self.file_path), 'rb') as file_obj:
 
-                context = etree.iterparse(file_obj, events=("end",), tag=page_tag, huge_tree=True) # streams the file, doesn't load everything to memory
-                
-                tostring_time = 0.0
-                last_report = time.time()
-                start_time_reading = time.time()
-                report_interval = self.set_up.get('change_extraction_processing', {}).get('progress_report_interval_sec', 30)
-                # time spent blocked on page_queue.put() because it's full,
-                # i.e. workers can't drain pages as fast as they're being read
-                queue_put_wait = 0.0
+            proc = subprocess.Popen(
+                ['pbzip2', '-d', '-c', str(dump_dir / Path(self.file_path))],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=1024*1024  # 1MB buffer for better throughput
+            )
 
-                for _, page_elem in context:
-                    keep = False
-                    entity_id = ""
+            context = etree.iterparse(proc.stdout, events=("end",), tag=page_tag, huge_tree=True) # streams the file, doesn't load everything to memory
+            
+            last_report = time.time()
+            start_time_reading = time.time()
+            report_interval = 60
 
-                    # Get title
+            for _, page_elem in context:
+                keep = False
+                entity_id = ""
+
+                # Get title
+                title_elem = page_elem.find(title_tag)
+                if title_elem is not None:
+                    entity_id = title_elem.text or ""
+                    if entity_id.startswith("Q") and entity_id not in WIKIDATA_SANDBOXES:
+                        keep = True
+
+                if keep:
+
+                    # Extract title = entity_id
                     title_elem = page_elem.find(title_tag)
                     if title_elem is not None:
-                        entity_id = title_elem.text or ""
-                        if entity_id.startswith("Q") and entity_id not in WIKIDATA_SANDBOXES:
-                            keep = True
+                        entity_id = (title_elem.text or '').strip()
 
-                    if keep:
-                        # Serialize the page element
+                    page_data = self.extract_page_data(page_elem, ns, entity_id)
 
-                        # Extract title = entity_id
-                        title_elem = self.page_elem.find(title_tag)
-                        if title_elem is not None:
-                            entity_id = (title_elem.text or '').strip()
+                    revision_count = len(page_data.revisions) if page_data else 0
+                    self.total_revisions += revision_count
 
+                    self.page_queue.put(page_data)
+                    self.num_entities += 1
 
+                # Periodic progress report
+                if time.time() - last_report > report_interval:
+                    rate = self.num_entities / (time.time() - self.start_time)
+                    queue_size = self.page_queue.qsize()
+                    alive_workers = sum(1 for p in self.workers if p.is_alive())
+                    print(f"Progress: {self.num_entities} entities read, {rate:.1f} entities/sec, "
+                        f"page_queue: {queue_size}/{self.queue_size}, "
+                        f"workers alive: {alive_workers}/{self.num_workers}", flush=True)
 
+                    sys.stdout.flush()
+                    last_report = time.time()
 
-                        ts_start = time.time()
-                        page_elem_str = etree.tostring(page_elem, encoding="utf-8")
-                        tostring_time += time.time() - ts_start
-
-                        revision_count = page_elem_str.count(b'<revision>')
-                        self.total_revisions += revision_count
-
-                        put_start = time.time()
-                        self.page_queue.put(page_elem_str)
-                        queue_put_wait += time.time() - put_start
-                        self.num_entities += 1
-
-                    # Periodic progress report
-                    if time.time() - last_report > report_interval:
-                        rate = self.num_entities / (time.time() - self.start_time)
-                        queue_size = self.page_queue.qsize()
-                        alive_workers = sum(1 for p in self.workers if p.is_alive())
-                        print(f"Progress: {self.num_entities} entities read, {rate:.1f} entities/sec, "
-                            f"page_queue: {queue_size}/{self.queue_size}, "
-                            f"time blocked putting into page_queue since last report: {queue_put_wait:.1f}s, "
-                            f"workers alive: {alive_workers}/{self.num_workers}", flush=True)
-
-                        sys.stdout.flush()
-                        queue_put_wait = 0.0
-                        last_report = time.time()
-
-                    # Clear page element to free memory
-                    start_clear = time.time()
-                    page_elem.clear()
-                    while page_elem.getprevious() is not None:
-                        del page_elem.getparent()[0]
-                    end_clear = time.time()
-                    print(f"Clearing page element took {end_clear - start_clear:.4f} seconds", flush=True)
-
-                    if self.stop_event.is_set():
-                        break
+                if self.stop_event.is_set():
+                    break
         except Exception as e:
             print(f"Parsing error in FileParser: {e}")
             print_exception_details(e, self.file_path)
             return 0, 0, self.file_path, "0"
+
+        stdout, stderr = proc.communicate()
+        if proc.returncode != 0:
+            print(f"pbzip2 error: {stderr.decode()}", flush=True)
         
         self._save_file_record()
 
         end_time_file_reading = time.time()
-
-        print('tostring_time={:.1f}s'.format(tostring_time), flush=True)
 
         # Send stop signals to workers
         for _ in range(self.num_workers):
@@ -439,14 +385,13 @@ class FileParser():
 
         self.stop_event.set()
 
-        if self.owns_writer:
-            print("Waiting for writer process to finish.", flush=True)
-            writer_join_start = time.time()
-            self.writer_process.join()
-            print(f"Writer process finished in {time.time() - writer_join_start:.1f}s "
-                  f"after all workers drained page_queue.", flush=True)
-            if self.writer_process.exitcode != 0:
-                raise Exception(f"DB writer process failed with exit code {self.writer_process.exitcode}")
+        print("Waiting for writer process to finish.", flush=True)
+        writer_join_start = time.time()
+        self.writer_process.join()
+        print(f"Writer process finished in {time.time() - writer_join_start:.1f}s "
+                f"after all workers drained page_queue.", flush=True)
+        if self.writer_process.exitcode != 0:
+            raise Exception(f"DB writer process failed with exit code {self.writer_process.exitcode}")
     
         total_time = time.time() - self.start_time
 
@@ -485,5 +430,5 @@ class FileParser():
 
         print(f"\n=== FINAL STATISTICS ===")
         print(f"Total file reading time: {end_time_file_reading - start_time_reading:.1f}s, \n Total processing time: {total_time:.1f}s, \n Total entities processed: {self.num_entities}")
-        
+
         sys.stdout.flush()

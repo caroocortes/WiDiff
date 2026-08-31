@@ -1,3 +1,29 @@
+change_extraction_processing:
+  db_batch_size: 5000
+  db_max_queue_size: 10000
+  files_directory: /path/to/dump/directory/
+  files_in_parallel: 4
+  language: en
+  memory_consumption_monitoring: true
+  page_queue_size: 1000
+  pages_in_parallel: 2
+database_config_path: config/db_config.json
+change_extraction_filters:
+  astronomical_objects_filter:
+    datatype_metadata_extraction: false
+    extract: true
+  less_filter:
+    datatype_metadata_extraction: false
+    extract: true
+    threshold: 10
+  rest:
+    datatype_metadata_extraction: false
+  scholarly_articles_filter:
+    datatype_metadata_extraction: false
+    extract: true
+re_interpretation: true
+reverted_edit_tagging:
+  time_threshold_seconds: 2419200
 analysis:
   distribution_of_revisions_value_changes:
     execute: true
@@ -15,41 +41,3 @@ analysis:
   stats_sa_ao:
     execute: false
     reload_data: false
-change_extraction_filters:
-  astronomical_objects_filter:
-    datatype_metadata_extraction: false
-    extract: true
-    feature_extraction: true
-  less_filter:
-    datatype_metadata_extraction: false
-    extract: true
-    feature_extraction: true
-    threshold: 10
-  rest:
-    datatype_metadata_extraction: false
-    feature_extraction: true
-  scholarly_articles_filter:
-    datatype_metadata_extraction: false
-    extract: true
-    feature_extraction: true
-change_extraction_processing:
-  db_batch_size: 5000
-  db_max_queue_size: 10000
-  files_directory: /path/to/xml-bz2-dump-files
-  files_in_parallel: 5
-  language: en
-  memory_consumption_monitoring: true
-  page_queue_size: 10000
-  pages_in_parallel: 2
-database_config_path: config/db_config.json
-re_interpretation: true
-reverted_edit_tagging:
-  time_threshold_seconds: 2419200
-transitive_closure_cache:
-  has_part_transitive_path: /path/to/transitive_closures/has_parts_transitive.csv
-  located_in_transitive_path: /path/to/transitive_closures/located_in_transitive.csv
-  part_of_transitive_path: /path/to/transitive_closures/part_of_transitive.csv
-  subclass_transitive_path: /path/to/transitive_closures/subclass_of_transitive.csv
-  transitive_closure_pickle_file_path: /path/to/transitive_closures/transitive_closure_cache.pkl
-  transitive_closure_stats_pickle_file_path: /path/to/transitive_closures/transitive_closure_stats.pkl
-update_entity_labels_descriptions: false

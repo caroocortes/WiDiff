@@ -901,70 +901,16 @@ class RuleBasedClassifier():
             print(f'Finished updating {suffix}_value_label and {suffix}_value_description in {elapsed_time} seconds', flush=True)
 
 
-    def separate_non_latin_changes(self, datatype, table_suffix):
-        """
-            Separate tables for text and entity labels that contain non-latin characters
-            We only classify on the latin ones
-        """
-
-        if datatype == 'entity':
-            filter_non_latin = r"""
-                (old_value_label = '' OR old_value_label IS NULL) OR
-                (new_value_label = '' OR new_value_label IS NULL) OR
-                old_value_label ~ '[^\u0000-\u036F\u1E00-\u1EFF\u2000-\u206F\u2070-\u218F]' OR
-                new_value_label ~ '[^\u0000-\u036F\u1E00-\u1EFF\u2000-\u206F\u2070-\u218F]'
-            """
-        else:
-            filter_non_latin = r"""
-                old_value->>0 ~ '[^\u0000-\u036F\u1E00-\u1EFF\u2000-\u206F\u2070-\u218F]' OR
-                new_value->>0 ~ '[^\u0000-\u036F\u1E00-\u1EFF\u2000-\u206F\u2070-\u218F]'
-            """
-
-        table = f"features_{datatype}{table_suffix}"
-        non_latin_table = f"features_{datatype}_non_latin{table_suffix}"
-        latin_tmp_table = f"{table}_latin_tmp"
-
-        cursor = self.conn.cursor()
-
-        cursor.execute(f"DROP TABLE IF EXISTS {non_latin_table};")
-        query_non_latin =f"CREATE TABLE {non_latin_table} AS SELECT * FROM {table} WHERE ({filter_non_latin});"
-        cursor.execute(query_non_latin)
-
-        print(query_non_latin)
-
-        cursor.execute(f"DROP TABLE IF EXISTS {latin_tmp_table};")
-        query_temp_latin = f"CREATE TABLE IF NOT EXISTS {latin_tmp_table} AS SELECT * FROM {table} WHERE NOT ({filter_non_latin});"
-        cursor.execute(query_temp_latin)
-        print(query_temp_latin)
-
-        cursor.execute(f"DROP TABLE {table};")
-        query_rename = f"ALTER TABLE {latin_tmp_table} RENAME TO {table};"
-        cursor.execute(query_rename)
-
-        self.conn.commit()
-
-    def entity_rb_classification(self, table_suffix, max_batches=None):
+    def entity_rb_classification(self, table_suffix):
 
         if table_suffix not in ['_sa', '_ao', '_less', '']:
             print('Unsupported table suffix for embedding features. Has to be one of _sa, _ao, _less. Input table suffix:', table_suffix, flush=True)
             return
         
         datatype = 'entity'
-
-        if self.set_up.get('separate_non_latin', False):
-            print(f'Separating non-latin changes for datatype: {datatype} and table suffix: {table_suffix}', flush=True)
-            self.separate_non_latin_changes(datatype, table_suffix)
-            print(f'Finished separating non-latin changes for datatype: {datatype} and table suffix: {table_suffix}', flush=True)
-
-            self.set_up['separate_non_latin'] = False
-            script_dir = Path(__file__).parent
-            with open(script_dir.parent.parent / Path(SETUP_PATH), 'w') as f:
-                yaml.dump(self.set_up, f)
         
         # transitive closure 
         self.transitive_cache = TransitiveClosureCache()
-
-        datatype = 'entity'
 
         gs_lookup = self._load_gs_lookup(datatype)
 
@@ -977,12 +923,12 @@ class RuleBasedClassifier():
         key_cols_str = ', '.join(key_cols)
 
         batch_size = 1000000
-        num_batches = 0
 
         cursor = self.conn.cursor()
 
         key_cols_temp = ', '.join([f'{col} {col_type}' for col, col_type in BASE_KEY_TYPES.items()])
-        cursor.execute(f"ALTER TABLE features_{datatype}{table_suffix} DROP COLUMN IF EXISTS processed, ADD COLUMN IF NOT EXISTS processed BOOLEAN DEFAULT FALSE;")
+        cursor.execute(f"ALTER TABLE updates_{datatype}{table_suffix} DROP COLUMN IF EXISTS label, ADD COLUMN IF NOT EXISTS label TEXT DEFAULT NULL;")
+        cursor.execute(f"ALTER TABLE updates_{datatype}{table_suffix} DROP COLUMN IF EXISTS processed, ADD COLUMN IF NOT EXISTS processed BOOLEAN DEFAULT FALSE;")
         self.conn.commit()
         cursor.execute(f"CREATE TEMP TABLE temp_results_{datatype}{table_suffix} ({key_cols_temp}, label TEXT)")
         self.conn.commit()
@@ -991,13 +937,9 @@ class RuleBasedClassifier():
 
         while True:
 
-            if max_batches and num_batches >= max_batches:
-                print(f'Reached max_batches limit ({max_batches}), stopping', flush=True)
-                break
-
             query = """
                 SELECT {key_cols_str}, {select_cols_str}
-                    FROM features_entity{table_suffix}
+                    FROM updates_entity{table_suffix}
                     WHERE 
                         processed = FALSE
                     LIMIT {batch_size}
@@ -1043,7 +985,7 @@ class RuleBasedClassifier():
             print('Updating feature table', flush=True)
 
             cursor.execute(f"""
-                UPDATE features_{datatype}{table_suffix} f
+                UPDATE updates_{datatype}{table_suffix} f
                 SET label = tp.label, processed = TRUE
                 FROM temp_results_{datatype}{table_suffix} tp
                 WHERE 
@@ -1055,10 +997,10 @@ class RuleBasedClassifier():
             self.conn.commit()
             
         elapsed_time = time.perf_counter() - start_time
-        print(f'Finished entity feature creation {elapsed_time} secs', flush=True)    
+        print(f'Finished entity rule-based classification in {elapsed_time} secs', flush=True)    
 
         cursor.execute(f"DROP TABLE temp_results_{datatype}{table_suffix}")
 
         self.conn.commit()
 
-        print(f'Total time spent on rule-based classification: {self.rule_base_time:.2f} seconds', flush=True)
+        print(f'Total time spent on rule-based classification (ONLY - without table updates): {self.rule_base_time:.2f} seconds', flush=True)

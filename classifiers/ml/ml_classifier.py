@@ -21,8 +21,8 @@ import json
 
 from .utils import get_time_unit
 from classifiers.feature_creation import FeatureCreation
-from parser_scripts.const import TEXT_EMBEDDING_FEATURE_COLS, TEXT_SIMPLE_FEATURE_COLS, ENTITY_SIMPLE_FEATURES_TYPES, ENTITY_EMBEDDING_FEATURE_COLS, ENTITY_UPDATES_COLS, TEXT_UPDATES_COLS
-from .const import BASE_KEY_TYPES, ML_MODELS, ML_MODELS_LABELS, TRAINING_DATASET_DIR, TRAINING_INFO_DIR, FEATURES_DIR
+from parser_scripts.const import ENTITY_UPDATES_COLS, TEXT_UPDATES_COLS
+from .const import BASE_KEY_TYPES, ML_MODELS, ML_MODELS_LABELS, TRAINING_DATASET_DIR, TRAINING_INFO_DIR, FEATURES_DIR, TEXT_SIMPLE_FEATURE_COLS, TEXT_EMBEDDING_FEATURE_COLS, ENTITY_SIMPLE_FEATURES_TYPES, ENTITY_EMBEDDING_FEATURE_COLS
 from sql_runner.sql_runner import SQLRunner
 
 class MLClassifier():
@@ -361,7 +361,6 @@ class MLClassifier():
         classifiers_kn = dict()
         classifiers_xgb = dict()
         
-        scalers = dict()
         for datatype in datatypes:
             print(f"\n{'='*50}")
             print(f"Training classifier for: {datatype}", flush=True)
@@ -455,11 +454,6 @@ class MLClassifier():
                 
                 with open(f'{TRAINING_INFO_DIR}/training_info_{model}.pkl', 'wb') as f:
                     pickle.dump(info, f)
-
-        os.makedirs(FEATURES_DIR, exist_ok=True)
-        path_to_scaler = f'{FEATURES_DIR}/scalers.pkl'
-        with open(path_to_scaler, 'wb') as f:
-            pickle.dump(scalers, f)
 
         with open(f'{TRAINING_INFO_DIR}/training_runtimes.pkl', 'wb') as f:
             pickle.dump(self.runtimes, f)
@@ -555,7 +549,8 @@ class MLClassifier():
 
         return results_df
     
-    def classify_changes(self, dt_label, table_prefix, db_config_path, batch_size=1000000, max_batches=None, ):
+    
+    def classify_changes(self, dt_label, table_suffix, db_config_path, batch_size=1000000):
         """
             Classify changes for a single datatype/label in smaller batches.
             The DB only stores the raw old/new values (+ labels/descriptions
@@ -574,9 +569,6 @@ class MLClassifier():
         table_name = dt_label
         label_column = 'label'
 
-        # TODO: remove this
-        rb_label_filter = "(rb_label = '' or rb_label IS NULL)"
-
         # only text changes go through gold-standard rows here - entity ones
         # are already filtered out upstream by entity_rb_classification,
         # which sets `label` for any row found in the gold standard
@@ -589,7 +581,7 @@ class MLClassifier():
 
             key_cols_temp = ', '.join([f'{col} {col_type}' for col, col_type in BASE_KEY_TYPES.items()])
 
-            cursor.execute(f"ALTER TABLE features_{table_name}{table_prefix} DROP COLUMN IF EXISTS {label_column}, ADD COLUMN IF NOT EXISTS {label_column} TEXT")
+            cursor.execute(f"ALTER TABLE updates_{table_name}{table_suffix} DROP COLUMN IF EXISTS {label_column}, ADD COLUMN IF NOT EXISTS {label_column} TEXT")
             conn.commit()
             cursor.execute(f"CREATE TEMP TABLE temp_predictions_{dt_label} ({key_cols_temp}, predicted_labels TEXT)")
 
@@ -600,17 +592,13 @@ class MLClassifier():
                 training_info_model = pickle.load(f)
 
             while True:
-                if max_batches and num_batches >= max_batches:
-                    print(f'Loaded {max_batches} batches from DB', flush=True)
-                    break
 
                 time_0 = time.time()
                 query = f"""
                     SELECT {key_cols_str}, {value_cols_str}
-                    FROM features_{table_name}{table_prefix}
+                    FROM updates_{table_name}{table_suffix}
                     WHERE
-                    (label = '' OR label IS NULL) AND
-                    {rb_label_filter}
+                    (label = '' OR label IS NULL)
                     LIMIT {batch_size}
                 """
 
@@ -670,7 +658,7 @@ class MLClassifier():
                 start_time = time.time()
                 # Update labels
                 cursor.execute(f"""
-                    UPDATE features_{table_name}{table_prefix} f
+                    UPDATE updates_{table_name}{table_suffix} f
                     SET {label_column} = tp.predicted_labels
                     FROM temp_predictions_{dt_label} tp 
                     WHERE 

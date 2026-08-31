@@ -68,17 +68,7 @@ def batch_insert(conn, batch, set_up, table_suffix=''):
 
 def db_writer(set_up, num_workers, results_queue):
 
-    log_dir = Path('logs')
-    log_dir.mkdir(exist_ok=True)
-    pid = os.getpid()
-    log_file = open(f'logs/db_writer_{pid}.log', 'w', buffering=1)  # Line buffered
-    
-    def log(msg):
-        """Helper to write to both stdout and log file"""
-        log_file.write(f"{msg}\n")
-        log_file.flush()
-
-    log(f"[DB_WRITER] Starting - Num workers: {num_workers}")
+    print(f"[DB_WRITER] Starting - Num workers: {num_workers}", flush=True)
 
     script_dir = Path(__file__).parent
     with open(script_dir.parent / set_up.get('database_config_path', 'config/db_config.json')) as f:
@@ -95,7 +85,7 @@ def db_writer(set_up, num_workers, results_queue):
         client_encoding='UTF8'
     )
 
-    log(f"[DB_WRITER] Database connection established")
+    print(f"[DB_WRITER] Database connection established", flush=True)
 
     base_table_names = [
         'revision',
@@ -119,15 +109,10 @@ def db_writer(set_up, num_workers, results_queue):
     workers_finished = 0
     last_write = time.time()
 
-    # time spent blocked on results_queue.get() with nothing to consume
-    # (large -> workers/files aren't producing fast enough, writer is starved)
-    idle_time = 0.0
-    # time spent actually inserting into Postgres
-    busy_time = 0.0
     total_rows_written = 0
     num_batch_inserts = 0
     last_status_report = time.time()
-    status_report_interval = 30
+    status_report_interval = 60
 
     batch_size = set_up.get('change_extraction_processing', {}).get('db_batch_size', 5000)
 
@@ -135,14 +120,12 @@ def db_writer(set_up, num_workers, results_queue):
         while workers_finished < num_workers:
             try:
 
-                get_start = time.time()
                 result = results_queue.get(timeout=60)
-                idle_time += time.time() - get_start
 
                 if result is None:
                     # Worker finished
                     workers_finished += 1
-                    log(f"[DB_WRITER] Worker finished, total finished: {workers_finished}/{num_workers}")
+                    print(f"[DB_WRITER] Worker finished, total finished: {workers_finished}/{num_workers}", flush=True)
                     continue
 
                 if result['is_scholarly_article']:
@@ -166,14 +149,9 @@ def db_writer(set_up, num_workers, results_queue):
                 
                 if len(batches[table_suffix]['revision']) >= batch_size or (time_since_write > 15 and current_batch_size > 0):
 
-                    insert_start = time.time()
                     batch_insert(conn, batches[table_suffix], set_up, table_suffix=table_suffix)
-                    insert_elapsed = time.time() - insert_start
-                    busy_time += insert_elapsed
                     num_batch_inserts += 1
                     total_rows_written += current_batch_size
-                    log(f"[DB_WRITER] Wrote batch{table_suffix or ''}: {current_batch_size} revisions in "
-                        f"{insert_elapsed:.2f}s ({current_batch_size / insert_elapsed if insert_elapsed > 0 else 0:.0f} rows/s)")
 
                     # Clear this batch
                     for table in batches[table_suffix]:
@@ -186,50 +164,42 @@ def db_writer(set_up, num_workers, results_queue):
                         qsize = results_queue.qsize()
                     except NotImplementedError:
                         qsize = -1  # not supported on this platform
-                    log(f"[DB_WRITER] Status: {num_batch_inserts} batches / {total_rows_written} rows written so far, "
-                        f"busy(inserting)={busy_time:.1f}s idle(waiting on queue)={idle_time:.1f}s, "
-                        f"queue backlog~{qsize}, workers finished={workers_finished}/{num_workers}")
+                    print(f"[DB_WRITER] Status: {num_batch_inserts} batches / {total_rows_written} rows written so far, "
+                        f"queue backlog~{qsize}, workers finished={workers_finished}/{num_workers}", flush=True)
                     last_status_report = time.time()
 
                 gc.collect(generation=0)
 
             except queue.Empty:
-                idle_time += 60  # the get() timeout that just elapsed
-                log(f"[DB_WRITER] Queue empty timeout - flushing batches")
+                print(f"[DB_WRITER] Queue empty timeout - flushing batches", flush=True)
                 for suffix, batch in batches.items():
                     if any(len(v) > 0 for v in batch.values()):
                         rows = len(batch['revision'])
-                        insert_start = time.time()
+
                         batch_insert(conn, batch, set_up, table_suffix=suffix)
-                        insert_elapsed = time.time() - insert_start
-                        busy_time += insert_elapsed
                         num_batch_inserts += 1
                         total_rows_written += rows
-                        log(f"[DB_WRITER] Flushed batch{suffix or ''}: {rows} revisions in {insert_elapsed:.2f}s")
+                        print(f"[DB_WRITER] Flushed batch{suffix or ''}: {rows} revisions", flush=True)
                         for table in batch:
                             batch[table] = []
 
         for suffix, batch in batches.items():
             if any(len(v) > 0 for v in batch.values()):
                 rows = len(batch['revision'])
-                insert_start = time.time()
                 batch_insert(conn, batch, set_up, table_suffix=suffix)
-                busy_time += time.time() - insert_start
                 num_batch_inserts += 1
                 total_rows_written += rows
 
-        log(f"[DB_WRITER] Completed successfully - {num_batch_inserts} batches, {total_rows_written} rows written, "
-            f"busy(inserting)={busy_time:.1f}s idle(waiting on queue)={idle_time:.1f}s")
+        print(f"[DB_WRITER] Completed successfully - {num_batch_inserts} batches, {total_rows_written} rows written", flush=True)
 
     except Exception as e:
-        log(f'Error in DB writer: {e}')
-        log(traceback.format_exc())
+        print(f'Error in DB writer: {e}', flush=True)
+        print(traceback.format_exc(), flush=True)
         raise e
     finally:
-        log(f"[DB_WRITER] Closing connection")
+        print(f"[DB_WRITER] Closing connection", flush=True)
         try:
             conn.close()
         except:
             pass
-        log(f"[DB_WRITER] Exiting")
-        log_file.close()
+        print(f"[DB_WRITER] Exiting", flush=True)

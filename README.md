@@ -6,8 +6,12 @@ This README is structured as follows:
 
 - [Change extraction](#change-extraction): change extraction prerequisites and configuration parameters.
 - [Running WiDiff](#running-widiff): explains how to run the extraction pipeline.
-- [Downloading extra data](#downloading-extra-data): explaines how to download extra data (e.g., labels and descriptions for all entities).
 - [Databse schema](#database-schema): database schema description and diagram (includes change schema and feature tables).
+- [Change classification](#change-classification): 
+  - [Change classification framework and change type taxonomy](#change-classification-framework-and-change-type-taxonomy): Describes the change classification framework and change type taxonomy
+  - [ML model training](#ml-model-training): describes how to re-train models if needed and provides links to trained models.
+  - []
+- [Downloading extra data](): explaines how to download extra data (e.g., labels and descriptions for all entities).
 - [Transitive Closure Cache Creation](#transitive-closure-cache-creation): instructions on how to create the transitive closure cache from the .csv files obtained in [Downloading extra data](#downloading-extra-data).
 - [Compute Remaining Features](#compute-remaining-features): instructions on how to compute remaining features for change type classification.
 - [Descriptive Analysis](#descriptive-analysis): instructions on how to re-run the analysis.
@@ -15,19 +19,17 @@ This README is structured as follows:
 ## Project structure
 ```bash
 ├── config/           # Configuration files
-├── auxiliary_data/           # Auxiliary datasets needed during parsing (property_labels.csv, subclassof_astronomical_objects.csv, subclassof_scholarly_articles.csv)
+├── auxiliary_data/           # Auxiliary datasets needed during parsing (subclassof_astronomical_objects.csv, subclassof_scholarly_articles.csv, transitive closure cache)
 ├── download_scripts/       # Script for downloading XML files + list of download links for the dump of 20250601
 ├── logs/       # Log folder with logs of change extraction
+├── classifiers/ # contains rule, ml and llm classifiers
 ├── parser_scripts/        # Core parsing classes 
 │   ├── file_parser.py              # Processes XML files, extracts pages
 │   ├── page_parser.py              # Processes a page (all edit history for an entity)
 │   ├── utils.py                    # Auxiliary methods 
 │   ├── const.py                    # Constants
-|   ├── feature_creation.py         # Creates features for change classification
-|   ├── compute_remaining_features.py # Creates features that weren't calculated during change extraction (e.g., embedding-based features)
-|   ├── transitive_closure_cache.py # Creates a cache from transitive closures for fast access
 │   └── db_writer.py # in charge of storing changes in the DB
-├── sql/        # stores .sql schema of DB
+├── table_schemas/        # stores .sql schema of DB
 └── wdtk/           # Files needed to extract extra data from a WD full dump (uses WD Toolkit)
 ```
 
@@ -63,6 +65,8 @@ Path to the database configuration file, which has to be a json file with the fo
     "DB_HOST": DB_HOST
 }
 ```
+
+We provide a template file in *config/db_config.json*.
 
 **NOTE: The DB needs to be created beforehand and the adequate credentials (username, user password, database name, hostname and port) need to be set on *the config/db_config.json* file. The schema is created by the pipeline.**
 
@@ -106,10 +110,10 @@ Controls revert edit tagging during change extraction.
 | time_threshold_seconds | Maximum time window (in seconds) within which an edit can be considered reverted. Default is *2419200* (4 weeks) |
 
 #### `re_interpretation`
-If *true*, performs the re-interpretation step, tagging soft deletions, soft insertions, value updates (for updates between values of different datatypes).
+If *true*, performs the re-interpretation step, tagging soft deletions, soft insertions, value updates (for updates between values of different datatypes), refinement/unrefinement/re-formatting/textual_change/property_value_update for time, quantity, globecoordinate, and text data types.
 
 #### `update_entity_labels_descriptions`
-If *true*, updates entity labels and descriptions the table *features_entity{suffix}*
+If *true*, updates entity labels and descriptions for the table *updates_entity{suffix}*
 
 ## Running WiDiff
 
@@ -126,8 +130,6 @@ python3 -m extract_changes [options]
 `-f FILE`: Path to .xml.bz2 file to process (for single file processing).
 `-n NUM_FILES`: maximum number of files to process on a run.
 
-*Note:* Processing each file takes approximately 1 hour.
-
 Alternatively, use the provided `run_parser.sh` script to process a maximum of `NUM_FILES` files (Activate environment with requirements.txt beforehand):
 
 ```bash
@@ -141,20 +143,481 @@ chmod +x run_parser.sh
 By default, extract_changes.py uses the following parallelization strategy:
 - Creates *files_in_parallel* processes (from set_up.yml) that call FileParser (*file_parser.py*)
 - Each FileParser creates *pages_in_parallel* processes (from set_up.yml) to call PageParser (*page_parser.py*) which processes a page (all revisions for an entity).
-- Creates a dedicated process for storing changes while they wait for batch insertion into the DB (*db_writer.py*)
+- Each file also gets its dedicated process for storing changes into the DB (*db_writer.py*)
 
-The system must support at least *files_in_parallel* × *pages_in_parallel* cores + 1 (for the *db_writer*).
+The system must support at least *files_in_parallel* × *pages_in_parallel* + *files_in_parallel* (for the *db_writer*) cores.
 
-Additionally, `file_parser.py` uses `bz2.open(file_path, 'rb')`, therefore, appropriate amount of memory needs to be reserved for processing files. 
+Additionally, `file_parser.py` uses `pbzip2`, therefore, appropriate amount of memory needs to be reserved for processing files. 
 
-![architecture diagram](diagrams/parser_arch.svg)
+![architecture diagram](diagrams/widiff_arch.svg)
 
 ### Output Files
 The pipeline generates three output files:
 
 - `processed_files.txt`: List of processed files (for tracking)
-- `parser_output.log`: Logs from file_parser and page_parser
+- `parser_output.log`: Logs from file_parser, page_parser and db_writer
 - `parser_log_files.json`: Summary with file size in MB, number of entities, number of processed revisions, avg. revisions per entity, time to read file (secs), total time to process file (secs), peak memory in MB (if `memory_consumption_monitoring: true` in set_up.yml)
+
+## Database schema
+The main schema is composed of the **change tables** (value, rank, qualifier, reference and data type metadata). Additionally, we also provide **entity_stats** tables which contain statistics (e.g., number of revisions, number or rank changes, etc.) per entity.
+
+In the following we provide a reduced database schema diagram of the change tables.
+
+The full schema for the tables can be found in *sql/change_schema.sql*, *sql/datatype_metadata_schema.sql*. 
+
+![database schema diagram](diagrams/database_schema_diagram.png)
+
+### Datatype groupings
+Since Wikidata defines 18 datatypes, some of which can have added "metadata" (e.g., a value of datatype quantity is accompanied by a unit, lower and upper bound), we group Wikidata's datatypes by their "JSON type" (See []()). For example, Wikidata's quantity datatype maps directly to a "JSON type" "quantity", while geo-shape maps to a "JSON type" "string". Therefore, we end up with the following datatypes: string, quantity, time, entity, globecoordinate.
+We also include a new "datatype" named "unknown-values" for the values "somevalue" and "novalue".
+
+In the following we show the groupings for "string" and "entity":
+STRING_TYPES = ['string', 'external-id', 'url', 'commonsMedia', 'geo-shape', 'tabular-data', 'math', 'musical-notation']
+
+ENTITY_TYPES = ['wikibase-item', 'wikibase-entityid', 'wikibase-property', 'wikibase-lexeme', 'wikibase-sense', 'wikibase-form', 'entity-schema']
+
+### Change Tables
+
+**`revision`** — one row per revision, storing metadata about each edit: the editor (user ID, username, type), timestamp, and a reference to the entity that was edited.
+
+| Column | Description |
+|---|---|
+| prev_revision_id | ID of the previous revision |
+| revision_id | ID of the revision |
+| entity_id | ID of the entity |
+| file_id | XML file name where this revision is stored |
+| timestamp | Timestamp of the revision |
+| user_id | ID of the user that made the edit |
+| username | Username of the user that made the edit |
+| user_type | User type. Can be "human" (for registered users), "bot" or "anonymous" |
+| comment | Comment on the revision |
+| q_id_redirect | Numeric part of the Q-id of the entity where the current entity is redirected to (e.g., if Q1 is redirected to Q123, then q_id_redirect holds the value 123) |
+
+*Primary key:* revision_id
+
+**`value_change`** — stores changes to statement values, including creations, deletions, and updates. Each row records the old and new value, the action performed, and whether the edit was reverted or is itself a reversion. The `change_target` field distinguishes between changes to the main value, a qualifier, the rank, or datatype metadata.
+
+| Column | Description |
+|---|---|
+| revision_id | ID of the revision |
+| property_id | ID of the property |
+| value_id | ID of the property value |
+| old_value | Old value of the property value |
+| new_value | New value of the property value |
+| old_datatype | Old datatype of the property value |
+| new_datatype | New datatype of the property value |
+| action | Indicates the action performed: CREATE, UPDATE or DELETE |
+| timestamp | Timestamp of the revision |
+| label | Label of change classification. Can contain the values: soft_insertion, soft_deletion, statement_insertion, statement_deletion, refinement, unrefinement, re_formatting, textual_change, property_value_update |
+| entity_id | ID of the entity |
+| is_reverted | 1 if the edit is reverted, 0 otherwise |
+| reversion | 1 if the edit does a reversion, 0 otherwise |
+| reversion_timestamp | Timestamp of the edit that does the reversion. This column holds a value only if is_reverted = 1, otherwise it's NULL |
+| revision_id_reversion | revision_id of the edit that does the reversion. This column holds a value only if is_reverted = 1, otherwise it's NULL |
+    
+*Primary key:* (revision_id, property_id, value_id)
+
+*Foreign key:* (revision_id) references revision(revision_id).
+
+**`qualifier_change`** — stores additions and deletions of qualifier values. Since qualifiers lack unique identifiers, only CREATE and DELETE actions are tracked (no UPDATE). Values are identified by a hash of their content.
+
+| Column | Description |
+|---|---|
+| revision_id | ID of the revision |
+| property_id | ID of the property |
+| value_id | ID of the property value |
+| qual_property_id | ID of the reference property |
+| value_hash | Hash computed from the property value. This hash + qual_property_id identify each statement value |
+| old_value | Old value of the property value |
+| new_value | New value of the property value |
+| old_datatype | Old datatype of the property value |
+| new_datatype | New datatype of the property value |
+| action | Indicates the action performed: CREATE or DELETE |
+| timestamp | Timestamp of the revision |
+| label | Label of change classification. Can contain the values: qualifier_insertion, qualifier_deletion, soft_deletion |
+| entity_id | ID of the entity |
+
+*Primary key:* (revision_id, property_id, value_id, qual_property_id, value_hash)
+
+*Foreign key:* (revision_id) references revision(revision_id).
+
+*Note:* (revision_id, property_id, value_id) does not necessarily exist in value_change since a revision could involve only qualifier changes
+
+**`reference_change`** — stores additions and deletions of reference values, following the same approach as `qualifier_change`. Each row is additionally identified by a reference hash (`ref_hash`), which identifies the reference group the value belongs to.
+
+| Column | Description |
+|---|---|
+| revision_id | ID of the revision |
+| property_id | ID of the property |
+| value_id | ID of the property value |
+| ref_property_id | ID of the reference property |
+| ref_hash | Hash computed from all the statement values in the reference. Identifies the reference (a reference is composed of multiple property - values) |
+| value_hash | Hash computed from the property value. This hash + ref_property_id identify each statement value inside the reference |
+| old_value | Old value of the property value |
+| new_value | New value of the property value |
+| old_datatype | Old datatype of the property value |
+| new_datatype | New datatype of the property value |
+| action | Indicates the action performed: CREATE or DELETE |
+| timestamp | Timestamp of the revision |
+| label | Label of change classification. Can contain the values: reference_insertion, reference_deletion |
+| entity_id | ID of the entity |
+
+*Primary key:* (revision_id, property_id, value_id, ref_hash, ref_property_id, value_hash)
+
+*Foreign key:* (revision_id) references revision(revision_id).
+
+*Note:* (revision_id, property_id, value_id) does not necessarily exist in value_change since a revision could involve only reference changes
+
+**`datatype_metadata_change`** — stores changes to datatype-specific metadata fields (e.g., `upperBound` for quantity values). These are tracked separately from the main value change.
+
+| Column | Description |
+|---|---|
+| revision_id | ID of the revision |
+| property_id | ID of the property |
+| value_id | ID of the property value |
+| old_value | Old value of the datatype metadata |
+| new_value | New value of the datatype metadata (e.g., if the 'unit' for a quantity value changes from *square metre (Q25343)* to *metre (Q11573)*, then old_value will have *Q25343* and new_value will have *Q11573*) |
+| old_datatype | Old datatype of the property value |
+| new_datatype | New datatype of the property value |
+| change_target | Name of datatype metadata (e.g. 'upperBound' for a quantity value) |
+| action | Indicates the action performed: CREATE or DELETE |
+| timestamp | Timestamp of the revision |
+| label | Label of change classification. Can contain the values: context_update |
+| entity_id | ID of the entity |
+
+*Primary key:* (revision_id, property_id, value_id, change_target)
+
+*Foreign key:* (revision_id) references revision(revision_id).
+
+**`entity_stats`** — one row per entity, aggregating counts of all change types, user types, reverted edits, and processing times. Useful for entity-level analysis without querying the full change tables.
+
+| Column | Description |
+|---|---|
+| entity_id | ID of the entity |
+| entity_label | Entity label. Extracted as the last one. |
+| entity_types_31 | List of Q-ids, corresponding to the last P31 values of the entity |
+| entity_types_279 | List of Q-ids, corresponding to the last P279 values of the entity |
+| num_revisions | Number of revisions |
+| num_value_changes | Number of value changes (CREATE, DELETE, UPDATE) | 
+| num_value_change_creates | Number of CREATE for property values changes |
+| num_value_change_deletes | Number of DELETE for property values changes |
+| num_value_change_updates | Number of UPDATE for property values changes |
+| num_rank_changes | Number of rank changes (CREATE, DELETE, UPDATE) | 
+| num_rank_creates | Number of CREATE for rank changes |
+| num_rank_deletes | Number of DELETE for rank changes |
+| num_rank_updates | Number of UPDATE for rank changes |
+| num_qualifier_changes | Number of qualifier changes (CREATE, DELETE) | 
+| num_reference_changes | Number of reference changes (CREATE, DELETE) |
+| num_datatype_metadata_changes | Number of datatype metadata changes (CREATE, DELETE, UPDATE) | 
+| num_datatype_metadata_creates | Number of CREATE for datatype metadata changes |
+| num_datatype_metadata_deletes | Number of DELETE for datatype metadata changes |
+| num_datatype_metadata_updates | Number of UPDATE for datatype metadata changes |
+| first_revision_timestamp | First revision timestamp |
+| last_revision_timestamp | First revision timestamp |
+| num_bot_edits | Number of bot edits | 
+| num_anonymous_edits | Number of anonymous edits |
+| num_human_edits | Number of human (registered user) edits |
+| num_reverted_edits | Number of reverted edit changes (CREATE, DELETE, UPDATE) | 
+| num_reversions | Number of reversion changes (CREATE, DELETE, UPDATE) | 
+| num_reverted_edits_create | Number of CREATE for reverted edit changes |
+| num_reverted_edits_delete | Number of DELETE for reverted edit changes |
+| num_reverted_edits_update | Number of UPDATE for reverted edit changes |
+| file_path | file name where the edit history of the entity is stored |
+| total_xml_parse_time_sec | Total time for reading the full page of the entity with all its edit history in seconds |
+| total_process_time_sec | Total time for processing the full edit history of the entity in seconds |
+| total_revision_diff_time_sec | Total time for calculating the diff between revisions in seconds |
+| num_revisions_timed | Number of revisions for which the time for calculating the diff with a consecutive revision was measured |
+| total_rev_edit_time_sec | Total time for reverted edit tagging |
+| total_feature_creation_sec | Total time for feature creation in secons |
+| num_feature_creations_timed | Number of feature creations calls for which the time was measured |
+| total_rule_based_classification_sec | Total time for rule_based_classification_sec |
+
+### Update Tables for Change Classification
+One update table for the data types text and entity: `updates_text`, `updates_entity`
+Each table stores the UPDATE changes that didn't get classified during rule-based classification, therefore, being classified with ML models.
+
+For entity changes, the table contains all entity UPDATEs since classification depends on label and description of the entities and this is not provided by the edit-history files (we only get the QIDs from the snapshots).
+
+**`updates_text`**
+| Column | Description |
+|---|---|
+| revision_id | ID of the revision |
+| property_id | ID of the property |
+| property_label | label of the property |
+| value_id | ID of the property value |
+| old_value | Old value of the property value |
+| new_value | New value of the property value |
+
+*Primary key:* (revision_id, property_id, value_id)
+
+*Foreign key:* (revision_id, property_id, value_id) references value_change(revision_id, property_id, value_id)
+
+**`updates_entity`**
+| Column | Description |
+|---|---|
+| revision_id | ID of the revision |
+| property_id | ID of the property |
+| property_label | label of the property |
+| value_id | ID of the property value |
+| old_value | Old value of the property value |
+| new_value | New value of the property value |
+
+| old_value_label | Label of the old_value |
+| new_value_label | Label of the new_value |
+| old_value_description | Description of the old_value |
+| new_value_description | Description of the new_value |
+
+*Primary key:* (revision_id, property_id, value_id)
+
+*Foreign key:* (revision_id, property_id, value_id) references value_change(revision_id, property_id, value_id)
+
+**Note:** All table names include a `{suffix}` placeholder, which is replaced at runtime for the different filters of entity types in `set_up.yml`. The values for this suffix can be: `_sa` (scholarly articles), `_ao` (astronomical objects), `_less` (entities with less than *threshold* value changes)
+
+## Change classification
+
+This step assumes the change extraction was performed with *re_interpretation: true* (see `set_up.yml`).
+
+Structure of section:
+- [Change Classification Framework and Change Type taxonomy](#change-classification-framework-and-change-type-taxonomy): presents the [change type taxonomy](#change-type-taxonomy) and classification framework
+- [ML model training](#ml-model-training): provides links to model, features, and classification results of our ML classifier for reproducibility
+- [Classification](#classification): explains how to train and run our ML-based classification, and describes how to run the LLM baseline.
+
+### Change Classification Framework and Change Type taxonomy
+
+This section our change classification framework and change taxonmy.
+
+As shown in the picture below, our change classification framework is composed of 3 steps. The first step classifies edit events which are the basic edits a user can perform on Wikidata entities. In particular, this step classifies (1) statement (and associated rank) insertion, update and deletion, (2) qualifier insertion and deletion, and (3) reference insertion and deletion.
+In Step 2 we re-interpret some edit events (e.g., the upgrade of a rank can be classified as soft insertion), tag reverted edits (reverted edits within 4 weeks) and value updates between values of different datatypes (e.g., quantity to string) or from "no value" or "some value" to a concrete value.
+Note that classification for Step 1 and 2 is performed in WiDiff by enabling *re-interpretation: true*.
+
+In Step 3, we refine value updates between values of the same datatype and classify them into refinement, unrefinement, re-formatting, textual change, link change, or value update (for complete changes between values).
+
+![classification framework](change_classification_framework.png)
+
+Next, we present the definitions of the different change types.
+
+#### Change Type Taxonomy
+
+##### Statement Addition
+A new statement is added to an entity. *Example:* for the entity Uruguay (Q77) the statement <Uruguay, capital, Montevideo>[↗](https://www.wikidata.org/w/index.php?title=Q77&diff=next&oldid=5443901) was added.
+
+##### Reference/Qualifier Addition
+A reference or qualifier is added to an existing statement. *Example:* The qualifier {end time: 2014} was added to <Luis Suárez, member of sports team, Liverpool F.C.>[↗](https://www.wikidata.org/w/index.php?title=Q26517&diff=prev&oldid=318347070), and the reference {imported from Wikimedia project: Italian Wikipedia} was added to <Luis Suárez, mass, 85>[↗](https://www.wikidata.org/w/index.php?title=Q26517&diff=prev&oldid=355943840).
+
+##### Soft Insertion
+A statement's rank is changed from *normal* or *deprecated* to *preferred*, indicating that it represents the most current or accurate value among multiple statements for the same property.
+*Example:* <Luis Suárez, given name, Luis> rank was promoted to *preferred*[↗](https://www.wikidata.org/w/index.php?title=Q26517&diff=prev&oldid=889792976), when a second statement <Luis Suárez, given name, Alberto> was added for the same property[↗](https://www.wikidata.org/w/index.php?title=Q26517&diff=next&oldid=889792976).
+
+##### Statement Deletion
+A statement is permanently removed from an entity.
+*Example:* <Frank van Pamelen, image, Lezing Frank van Pamelen over De Vliegende Hollander.webm>[↗](https://www.wikidata.org/w/index.php?title=Q21281434&diff=next&oldid=1328934396) was deleted after the correct statement (using the *video* property) was added in the prior revision[↗](https://www.wikidata.org/w/index.php?title=Q21281434&diff=prev&oldid=1328934396).
+
+##### Reference/Qualifier Deletion
+A reference or qualifier is removed from an existing statement. *Example:* The reference {imported from Wikimedia project: Italian Wikipedia} was removed from <Luis Suárez, mass, 85>[↗](https://www.wikidata.org/w/index.php?title=Q26517&diff=prev&oldid=759983195) and replaced by a more precise one. Similarly, the qualifier {end time: 2020} was removed from <Luis Suárez, member of sports team, Futbol Club Barcelona> and replaced by {end time: September 2020}[↗](https://www.wikidata.org/w/index.php?title=Q26517&diff=prev&oldid=1282785821).
+
+##### Soft Deletion
+A statement is logically invalidated without being removed, either by setting its rank to *deprecated* or by adding an *end time (P582)* qualifier (in practice, we also consider the properties *earliest end date (P8554)*, *latest end date (P12506)*, and *end period (P3416)*).
+
+**Examples:**
+- <X, native label, Twitter> was deprecated [↗](https://www.wikidata.org/w/index.php?title=Q918&diff=next&oldid=1941896530) in favour of <X, native label, X>[↗](https://www.wikidata.org/w/index.php?title=Q918&diff=prev&oldid=1941896530)
+- {end time: July 2023} was added to <X, official name, Twitter>[↗](https://www.wikidata.org/w/index.php?title=Q918&diff=prev&oldid=1942019219) to mark the renaming of the social network.
+
+##### Value Update
+A property value is replaced with a semantically different value, altering the statement's meaning. For time, quantity, and globecoordinate values, we also consider sign changes (e.g., -1 -> +1(https://www.wikidata.org/w/index.php?title=Q801294&diff=prev&oldid=110422583)) as value updates, since switching the sign alters the meaning of the value. 
+**Examples:**
+- *Entity:* Agnosticism (Q288928) -> Islam (Q432)[↗](https://www.wikidata.org/w/index.php?title=334871&diff=prev&oldid=1035395644)
+- *Text:* "a country in North America" -> "a country in Central America"[↗](https://www.wikidata.org/w/index.php?title=242&diff=prev&oldid=3747808)
+- *Quantity:* +1684527 -> +1719070[↗](https://www.wikidata.org/w/index.php?title=254232&diff=prev&oldid=1028093806) or -1 -> +1 [↗](https://www.wikidata.org/w/index.php?title=Q801294&diff=prev&oldid=110422583)
+- *Globe coordinate:* {"latitude": -3.09771, "longitude": -226.98051}{"latitude": -2.8114, "longitude": 118.169}[↗](https://www.wikidata.org/w/index.php?title=26727&diff=prev&oldid=135136435).
+- *Time:* -5-00-00 -> +1951-09-25[↗](https://www.wikidata.org/w/index.php?title=210447&diff=prev&oldid=1070077246) or +100-00-00 -> -100-00-00[↗](https://www.wikidata.org/w/index.php?title=Q801294&diff=prev&oldid=663123864), +1764-01-01 -> +1764-00-00[↗](https://www.wikidata.org/w/index.php?title=Q801294&diff=prev&oldid=1574340120)
+
+##### Re-formatting
+A property value’s representation is modified at the surface-level, without altering its underlying meaning. For numeric values, re-formatting covers changes in numerical precision that do not alter the value (e.g., adding or removing trailing zeros), while for time values .....
+**Examples:**
+- *Quantity:* +4.0 -> +4[↗](https://www.wikidata.org/w/index.php?title=Q801294&diff=prev&oldid=109984021) or +98 -> +98.0[↗](https://www.wikidata.org/w/index.php?title=Q801294&diff=prev&oldid=107182680)
+
+##### Textual Change
+A property value of type text is modified to correct or introduce language errors, such as spelling, typos, or grammar, without altering sentence structure or the statement's meaning.
+**Examples:**
+- "country in southeastern Europe" -> "Country in Southeast Europe"[↗](https://www.wikidata.org/w/index.php?title=Q225&diff=prev&oldid=1678150592)
+- "American acterss" -> "American actress"[↗](https://www.wikidata.org/w/index.php?title=Q801294&diff=prev&oldid=143695424)
+- "German neuroloigst" -> "German neurologist"[↗](https://www.wikidata.org/w/index.php?title=61670\&diff=prev\&oldid=1294776951)
+- "country in southeastern Europe" -> "Country in Southeast Europe"[↗](https://www.wikidata.org/w/index.php?title=Q225\&diff=prev\&oldid=1678150592)
+- "Province of Lecce" -> "Pprovince of Lecce"[↗](https://www.wikidata.org/w/index.php?title=16197\&diff=prev\&oldid=2026395311)
+- "sovereignt" -> "sovereignty"[↗](https://www.wikidata.org/w/index.php?title=42008&diff=prev&oldid=1288335214)
+- "A mountain in Beijing" -> "mountain in Beijing"[↗](https://www.wikidata.org/w/index.php?title=111218927&diff=prev&oldid=2306840798)
+
+##### Refinement / Unrefinement
+A property value is replaced by a more (refinement) or less (unrefinement) precise value, without changing the statement's meaning. A refinement may add contextual information, rephrase a text to convey the same meaning more clearly, increase numerical precision, or provide a more specific classification. Analogously, an unrefinement may remove contextual information, decrease numerical precision, or generalize to a broader classification. In both cases, the new value remains semantically compatible with the old one.
+**Examples:**
+- *Entity:* business (Q4830453) <-> automobile manufacturer (Q786820)[↗](https://www.wikidata.org/w/index.php?title=257815&diff=prev&oldid=1316485355)
+- *Text:* "city" <-> "city in South Korea"[↗](https://www.wikidata.org/w/index.php?title=42131&diff=prev&oldid=369720776)
+- *Quantity:* +222 <-> +222.4[↗](https://www.wikidata.org/w/index.php?title=192789&diff=prev&oldid=986978112)
+- *Globe coordinate:* {"latitude": 14, "longitude": 121.917} <-> {"latitude": 14, "longitude": 121.91666666667} [↗](https://www.wikidata.org/w/index.php?title=103807&diff=prev&oldid=89413888)
+- *Time:* +1910-02-10 <-> +1910-00-00[↗](https://www.wikidata.org/w/index.php?title=Q3895839&diff=prev&oldid=1431694434)
+
+##### Reverted Edit
+A change is considered reverted when a subsequent edit restores a previous value of a property.
+*Example:* "44th President of the United States of America" -> "Worst president ever" for Barack Obama (Q76) [↗](https://www.wikidata.org/w/index.php?title=Q76&diff=prev&oldid=7375872) was reverted in a subsequent revision.
+
+The following table presents a summary of the change types, indicating which ones are reversible, their granularity and classification step.
+
+| **Category** | **Change Type** | **Reversible** | **Granularity** | **Classification Step** |
+|:---|:---|:---:|:---:|:---:|
+| **Create** | Reference/Qualifier insertion | | Statement | 1 |
+| | Statement insertion | x | Entity | 1 |
+| | Soft insertion | x | Statement | 2 |
+| **Update** | Re-formatting* | x | Value | 3 |
+| | Refinement | x | Value | 3 |
+| | Unrefinement | x | Value | 3 |
+| | Textual change* | x | Value | 3 |
+| | Value update | x | Statement | 2 & 3 |
+| **Delete** | Reference/Qualifier deletion | | Statement | 1 |
+| | Statement deletion | x | Entity | 1 |
+| | Soft deletion | x | Statement | 2 |
+
+\* *Re-formatting* to time, globecoordinate, and quantity values; *Textual change* to text values only.
+
+--- 
+
+### ML model training
+
+**NOTE:** The trained ML models and features can be found in [Wikidata Change Classification models and features]().
+
+**Configuration**
+
+Training is performed doing 5-fold cross validation with a 3-fold cross validation for Grid Search per outer fold. The number of folds (5) can be changed in *classifiers/ml/config/ml_classifier_config.json*
+
+Additionally, since we want to guarantee that every change has a label assigned and multi-label classifiers return probabilities for each class, we assign all labels to a change where prob >= 0.5, If no probability reaches this threshold, we take the one with the maximum probability. This threshold can be modified in *classifiers/ml/config/ml_classifier_config.json*.
+
+Finally, we use *random_state = 42* so results are reproducible (also set in *classifiers/ml/config/ml_classifier_config.json*).
+
+**Output**
+
+Training outputs *training_info_<model_name>.pkl* files with the following structure:
+
+`````bash
+    {
+        "datatype": {
+            'results_folds': [], # results per fold
+            'micro_averages': {
+                'datatype': {
+                    'precision': float,
+                    'recall': float,
+                    'accuracy': float,
+                    'f1': float
+                }
+            } 
+    }
+
+    # results per fold:
+    {
+        'classifier': string, # kn, xgboost, random_forest, gradient_boosting
+        'fold': int, # 0-4
+        'scaler': sklearn_scaler_for_fold,
+        'metrics_results': { # macro average
+            'label': { 
+                'precision': float,
+                'recall': float,
+                'accuracy': float,
+                'f1': float
+            }
+        },
+        'model': clf, # if the base_model doesn't support MultiOutput classification, we send it through MultiOutputClassifier. If not base_model == model
+        'base_model': model, # base model (GradientBoosting, RandomForest, XGBoost, KNN)
+        'features': feature_cols, 
+        'label_binarizer': label_binarizer,
+        'best_params': best_params_from_grid_search
+    }
+`````
+
+**Re-training**
+
+1. To re-train models, set the following parameters in *wikidata-edit-history/classifier_setup.yml*:
+  ```
+    config:
+      classifier_type: ml
+    classification_ml:
+      train: true
+      classify: false
+      evaluate: true
+  ```
+
+---
+
+### LLM baseline
+1. Configure LLM in *classifiers/llm/config/llm_classifier_config.json*. To use Qwen 3.5 (FP8 quantized), run the script *classifiers/llm/qwen_server.sh* in the background and set the corresponding `base_url` in the configuration file (*classifiers/llm/config/llm_classifier_config.json*). 
+2. Set `classifier_type: llm` in  *wikidata-edit-history/classifier_setup.yml*. 
+3. Run `python3 -m classifiy_remaining_changes`. This classifies changes on the labeled dataset (*classifiers/ml/training_dataset*). To modify the changes to label, set the `[classification_llm][path_to_entity_changes]` and `[classification_llm][path_to_text_changes]` in  *wikidata-edit-history/classifier_setup.yml* to other files.
+
+*Note:* We used 2 40GB VRAM GPUs and that's why `--tensor-parallel-size 2` is used in *classifiers/llm/qwen_server.sh*. If running on a single GPU, then this should be removed
+
+---
+
+### Classification of remaining changes (Text and Entity)
+
+1. Download Transitive closure cache from [WiDiff: Wikidata Entities Transitive Closures (October 2025)](https://doi.org/10.5281/zenodo.22203191) and store it in *auxiliary_data/transitive_closures*. If not, create a new one following the steps in [Downloading extra data](#downloading-extra-data) and [Transitive Closure Cache Creation](#transitive-closure-cache-creation)
+2. Download the trained ML classifiers from [Wikidata Change Classification models and features]() and put both *training_info* and *features* folder under *classifiers/ml/*.
+3. Set the following parameters in *wikidata-edit-history/classifier_setup.yml*:
+````
+  config:
+    db_config_path: path_to_db_with_changes
+  classification:
+    classifier_type: ml
+  classification_ml:
+    train: false
+    classify: true
+    evaluate: false
+    table_suffix: '' <- change for the corresponding table suffix (See Database schema and change extraction filters)
+  update_entity_labels_descriptions: true
+  separate_non_latin_entity: true
+  separate_non_latin_text: true
+````
+
+**NOTE:** db_config_path is the path to the database that stored the changes. The config.json has the same structure as the one set for change extraction, can use that one as is.
+
+4. Run:
+
+```bash
+python3 -m classify_remaining_changes
+```
+
+this command classifies entity changes using rule-based first, and then classifies the remaining entity and text changes using the trained ML model.
+
+## Descriptive Analysis -- TODO: Needs UPDATING
+Descriptive analysis scripts are provided in `analysis/scripts.py`. Each analysis can be enabled and configured independently in `setup.yml` under the `analysis` section:
+
+```yaml
+analysis:
+  distribution_of_revisions_value_changes:
+    execute: true   # set to true to run this analysis
+    reload_data: false  # set to true to re-run the SQL query and overwrite stored results in analysis/results/
+  entity_types_analysis:
+    execute: true
+    reload_data: false
+  property_stats:
+    execute: true
+    reload_data: false
+```
+
+To run the analysis, simply execute from root:
+
+```bash
+python3 -m analysis.scripts.general_analysis
+```
+
+| Analysis | Description |
+|---|---|
+| `distribution_of_revisions_value_changes` | Distribution of revisions and value changes across all entities |
+| `entity_types_analysis` | Largest entity types, most edited entity types and user type breakdown for the latter |
+| `property_stats` | Most edited properties (wrt. number of entities that have a change to that entity) and type of action distribution |
+
+Output figures are saved to `analysis/results/figures/`.
+
+We provide datasets to run this analysis ([WiDiff: Analysis Results from Wikidata Edit History Dump (June 2025)](https://doi.org/10.5281/zenodo.19771569)). Download the *widiff_analysis_results_20250601.zip* and put the .csv files in the folder `analysis/results/`.
+
+**Note:** Set `reload_data: true` (if you want to obtain fresh results and not use the ones provided in [WiDiff: Analysis Results from Wikidata Edit History Dump (June 2025)](https://doi.org/10.5281/zenodo.19771569)) to execute the SQL queries and store the results. Subsequent runs can use `reload_data: false` to load from the stored results.
+
 
 ## Downloading extra data
 
@@ -169,25 +632,15 @@ All files needed for this step are in the folder `/wdtk` of this repository.
 
 We use the [Wikidata Toolkit](https://github.com/Wikidata-Toolkit/Wikidata-Toolkit) to extract additional data from a Wikidata JSON dump.
 
-We provide the extracted data in [WiDiff: Wikidata Entity Labels, Descriptions and Alias, Types (P31 and P279), and Transitive Closures (October 2025)](https://doi.org/10.5281/zenodo.19771721). To extract new data, follow the steps below.
+We provide the extracted data in [WiDiff: Wikidata Entities Transitive Closures (October 2025)](https://doi.org/10.5281/zenodo.22203191). To extract new data, follow the steps below.
 
 Three extraction classes are provided:
 
 | Class | Description |
 |---|---|
-| `ExtractLabelsProperties` | Extracts entity labels, aliases, descriptions, and property labels |
-| `ExtractInstanceOfSubclassOf` | Extracts `instance of (P31)` and `subclass of (P279)` for every entity |
 | `ExtractTransitiveClosure` | Extracts transitive closures for `subclass of`, `has part(s)`, `part of`, and `located in` |
 
 ### Output Files
-
-**`ExtractLabelsProperties`**
-- `entity_labels_alias_description.csv` — label, first alias, and description for each entity. Columns: `qid`, `numeric_id`, `label`, `alias`, `description`
-- `property_labels.csv` — label for each property. Columns: `property_id`, `numeric_id`, `property_label`
-
-**`ExtractInstanceOfSubclassOf`**
-- `p31_entity_types.csv` — extracted from `<Q-id, P31, Q-id>`. Columns: `entity`, `entity_numeric_id`, `entity_type (Q-id)`, `entity_type_numeric_id`
-- `p279_entity_types.csv` — extracted from `<Q-id, P279, Q-id>`. Columns: `entity`, `entity_numeric_id`, `entity_type (Q-id)`, `entity_type_numeric_id`
 
 **`ExtractTransitiveClosure`** (up to 10 hops, columns: `entity_id`, `entity_id_numeric`, `transitive_closure_qids`, `transitive_closure_numeric_ids`)
 - `subclass_of_transitive.csv` — transitive closure of `subclass of (P279)`
@@ -213,7 +666,7 @@ Example: *Wikidata-Toolkit/dumpfiles/wikidatawiki/json-20252018/wikidata-2025101
 
 **3. Add the extraction files**
 
-Copy `ExtractLabelsProperties.java`, `ExtractTransitiveClosure.java`, `ExtractInstanceOfSubclassOf.java`, and `config.properties` from `wdtk/` into:
+Copy `ExtractTransitiveClosure.java`, and `config.properties` from `wdtk/` into:
 ```
 Wikidata-Toolkit/wdtk-examples/src/main/java/org/wikidata/wdtk/examples/
 ```
@@ -270,404 +723,6 @@ Then run:
 bash extract_extra_data.bash
 ```
 
-## Database schema
-The database is organized into two groups of tables: **change tables**, which store the extracted changes, and **feature tables**, which store the features computed for change classification. Additionally, we also provide **entity_stats** tables which contain statistics (e.g., number of revisions, number or rank changes, etc.) per entity.
-
-Given the amount of data on Wikidata, the most tables contain "redundant data" for query performance or to simplify aggregations (e.g., tables with a timestamp column contain columns with the week, year_moth and year of the timestamp for aggregations on different time levels).
-
-In the following we provide a reduced database schema diagram of the change tables. We removed all redundant columns added for query optimization purposes (e.g., timestamp in *value_change* table).
-
-The full schema for the tables can be found in *sql/change_schema.sql*, *sql/features_schema.sql*, *sql/datatype_metadata_schema.sql*. 
-
-![database schema diagram](diagrams/database_schema_diagram.png)
-
-### Datatype groupings
-Since Wikidata defines 18 datatypes, some of which can have added "metadata" (e.g., a value of datatype quantity is accompanied by a unit, lower and upper bound), we group Wikidata's datatypes by their underlying JSON representation. For example, Wikidata's quantity datatype maps directly to a JSON quantity type, while geo-shape is represented as a JSON string. Therefore, we end up with the following datatypes: string, quantity, time, entity, globecoordinate.
-We also include a new "datatype" named "unknown-values" for the values "somevalue" and "novalue".
-
-In the following we show the groupings for "string" and "entity":
-STRING_TYPES = ['monolingualtext', 'string', 'external-id', 'url', 'commonsMedia', 'geo-shape', 'tabular-data', 'math', 'musical-notation', 'unknown-values']
-
-ENTITY_TYPES = ['wikibase-item', 'wikibase-entityid', 'wikibase-property', 'wikibase-lexeme', 'wikibase-sense', 'wikibase-form', 'entity-schema']
-
-### Change Tables
-
-**`revision`** — one row per revision, storing metadata about each edit: the editor (user ID, username, type), timestamp, and a reference to the entity that was edited.
-
-| Column | Description |
-|---|---|
-| prev_revision_id | ID of the previous revision |
-| revision_id | ID of the revision |
-| entity_id | ID of the entity |
-| entity_label | Entity label. Extracted as the last one. |
-| file_path | XML file name where this revision is stored |
-| timestamp | Timestamp of the revision |
-| week | Week of the timestamp of the revision |
-| year_month | Year and Month (YYYY-MM) of the timestamp of the revision |
-| year | Year of the timestamp of the revision |
-| user_id | ID of the user that made the edit |
-| username | Username of the user that made the edit |
-| user_type | User type. Can be "human" (for registered users), "bot" or "anonymous" |
-| comment | Comment on the revision |
-| redirect | If *true* the revision is a redirect |
-| q_id_redirect | Numeric part of the Q-id of the entity where the current entity is redirected to (e.g., if Q1 is redirected to Q123, then q_id_redirect holds the value 123) |
-
-*Primary key:* revision_id
-
-**`value_change`** — stores changes to statement values, including creations, deletions, and updates. Each row records the old and new value, the action performed, and whether the edit was reverted or is itself a reversion. The `change_target` field distinguishes between changes to the main value, a qualifier, the rank, or datatype metadata.
-
-| Column | Description |
-|---|---|
-| revision_id | ID of the revision |
-| property_id | ID of the property |
-| property_label | label of the property |
-| value_id | ID of the property value |
-| old_value | Old value of the property value |
-| new_value | New value of the property value |
-| old_datatype | Old datatype of the property value |
-| new_datatype | New datatype of the property value |
-| change_target | Indicates what is being modified. If '' then old_value and new_value correspond to a property value. If 'rank' then old_value and new_value correspond to a change in the rank of a statement. If 'language' then old_value and new_value correspond to a change in the language of a monolingualtext value. |
-| action | Indicates the action performed: CREATE, UPDATE or DELETE |
-| target | Indicates what is being changed: PROPERTY, RANK, PROPERTY_DATATYPE_METADATA |
-| old_hash | Hash of the old value. This is constructed from the JSON of the value |
-| new_hash | Hash of the new value. This is constructed from the JSON of the value |
-| timestamp | Timestamp of the revision |
-| week | Week of the timestamp of the revision |
-| year_month | Year and Month (YYYY-MM) of the timestamp of the revision |
-| year | Year of the timestamp of the revision |
-| label | Label of change classification. Can contain the values: soft_insertion, soft_deletion, statement_insertion, statement_deletion, soft_insertion, soft_deletion |
-| entity_id | ID of the entity |
-| is_reverted | 1 if the edit is reverted, 0 otherwise |
-| reversion | 1 if the edit does a reversion, 0 otherwise |
-| reversion_timestamp | Timestamp of the edit that does the reversion. This column holds a value only if is_reverted = 1, otherwise it's NULL |
-| revision_id_reversion | revision_id of the edit that does the reversion. This column holds a value only if is_reverted = 1, otherwise it's NULL |
-| entity_label | Entity label. Extracted as the last one. |
-    
-*Primary key:* (revision_id, property_id, value_id, change_target)
-
-*Foreign key:* (revision_id) references revision(revision_id).
-
-**`qualifier_change`** — stores additions and deletions of qualifier values. Since qualifiers lack unique identifiers, only CREATE and DELETE actions are tracked (no UPDATE). Values are identified by a hash of their content.
-
-| Column | Description |
-|---|---|
-| revision_id | ID of the revision |
-| property_id | ID of the property |
-| property_label | label of the property |
-| value_id | ID of the property value |
-| qual_property_id | ID of the reference property |
-| qual_property_label | Label of the reference property |
-| value_hash | Hash computed from the property value. This hash + qual_property_id identify each statement value |
-| old_value | Old value of the property value |
-| new_value | New value of the property value |
-| old_datatype | Old datatype of the property value |
-| new_datatype | New datatype of the property value |
-| change_target | Indicates what is being modified. Always '' in this table. |
-| action | Indicates the action performed: CREATE or DELETE |
-| target | Indicates what is being changed: REFERENCE |
-| old_hash | Hash of the old value. This is constructed from the JSON of the value |
-| new_hash | Hash of the new value. This is constructed from the JSON of the value |
-| timestamp | Timestamp of the revision |
-| week | Week of the timestamp of the revision |
-| year_month | Year and Month (YYYY-MM) of the timestamp of the revision |
-| year | Year of the timestamp of the revision |
-| label | Label of change classification. Can contain the values: qualifier_insertion, qualifier_deletion, soft_deletion |
-| entity_id | ID of the entity |
-| entity_label | Entity label. Extracted as the last one. |
-
-*Primary key:* (revision_id, property_id, value_id, qual_property_id, value_hash, change_target)
-
-*Foreign key:* (revision_id) references revision(revision_id).
-
-*Note:* (revision_id, property_id, value_id, change_target) does not necessarily exist in value_change since a revision could involve only qualifier changes
-
-**`reference_change`** — stores additions and deletions of reference values, following the same approach as `qualifier_change`. Each row is additionally identified by a reference hash (`ref_hash`), which identifies the reference group the value belongs to.
-
-| Column | Description |
-|---|---|
-| revision_id | ID of the revision |
-| property_id | ID of the property |
-| property_label | label of the property |
-| value_id | ID of the property value |
-| ref_property_id | ID of the reference property |
-| ref_property_label | Label of the reference property |
-| ref_hash | Hash computed from all the statement values in the reference. Identifies the reference (a reference is composed of multiple property - values) |
-| value_hash | Hash computed from the property value. This hash + ref_property_id identify each statement value inside the reference |
-| old_value | Old value of the property value |
-| new_value | New value of the property value |
-| old_datatype | Old datatype of the property value |
-| new_datatype | New datatype of the property value |
-| change_target | Indicates what is being modified. Always '' in this table. |
-| action | Indicates the action performed: CREATE or DELETE |
-| target | Indicates what is being changed: REFERENCE |
-| old_hash | Hash of the old value. This is constructed from the JSON of the value |
-| new_hash | Hash of the new value. This is constructed from the JSON of the value |
-| timestamp | Timestamp of the revision |
-| week | Week of the timestamp of the revision |
-| year_month | Year and Month (YYYY-MM) of the timestamp of the revision |
-| year | Year of the timestamp of the revision |
-| label | Label of change classification. Can contain the values: reference_insertion, reference_deletion |
-| entity_id | ID of the entity |
-| entity_label | Entity label. Extracted as the last one. |
-
-*Primary key:* (revision_id, property_id, value_id, ref_hash, ref_property_id, value_hash, change_target)
-
-*Foreign key:* (revision_id) references revision(revision_id).
-
-*Note:* (revision_id, property_id, value_id, change_target) does not necessarily exist in value_change since a revision could involve only reference changes
-
-**`datatype_metadata_change`** — stores changes to datatype-specific metadata fields (e.g., `upperBound` for quantity values). These are tracked separately from the main value change.
-
-| Column | Description |
-|---|---|
-| revision_id | ID of the revision |
-| property_id | ID of the property |
-| property_label | label of the property |
-| value_id | ID of the property value |
-| ref_property_id | ID of the reference property |
-| ref_property_label | Label of the reference property |
-| ref_hash | Hash computed from all the statement values in the reference. Identifies the reference (a reference is composed of multiple property - values) |
-| value_hash | Hash computed from the property value. This hash + ref_property_id identify each statement value inside the reference |
-| old_value | Old value of the datatype metadata |
-| new_value | New value of the datatype metadata (e.g., if the 'unit' for a quantity value changes from *square metre (Q25343)* to *metre (Q11573)*, then old_value will have *Q25343* and new_value will have *Q11573*) |
-| old_datatype | Old datatype of the property value |
-| new_datatype | New datatype of the property value |
-| change_target | Name of datatype metadata (e.g. 'upperBound' for a quantity value) |
-| action | Indicates the action performed: CREATE or DELETE |
-| target | Indicates what is being changed: REFERENCE |
-| old_hash | Hash of the old value. This is constructed from the JSON of the value |
-| new_hash | Hash of the new value. This is constructed from the JSON of the value |
-| timestamp | Timestamp of the revision |
-| week | Week of the timestamp of the revision |
-| year_month | Year and Month (YYYY-MM) of the timestamp of the revision |
-| year | Year of the timestamp of the revision |
-| label | Label of change classification. Can contain the values: reference_insertion, reference_deletion |
-| entity_id | ID of the entity |
-| entity_label | Entity label. Extracted as the last one. |
-
-*Primary key:* (revision_id, property_id, value_id, change_target)
-
-*Foreign key:* (revision_id) references revision(revision_id).
-
-**`entity_stats`** — one row per entity, aggregating counts of all change types, user types, reverted edits, and processing times. Useful for entity-level analysis without querying the full change tables.
-
-| Column | Description |
-|---|---|
-| entity_id | ID of the entity |
-| entity_label | Entity label. Extracted as the last one. |
-| entity_types_31 | List of Q-ids, corresponding to the last P31 values of the entity |
-| num_revisions | Number of revisions |
-| num_value_changes | Number of value changes (CREATE, DELETE, UPDATE) | 
-| num_value_change_creates | Number of CREATE for property values changes |
-| num_value_change_deletes | Number of DELETE for property values changes |
-| num_value_change_updates | Number of UPDATE for property values changes |
-| num_rank_changes | Number of rank changes (CREATE, DELETE, UPDATE) | 
-| num_rank_creates | Number of CREATE for rank changes |
-| num_rank_deletes | Number of DELETE for rank changes |
-| num_rank_updates | Number of UPDATE for rank changes |
-| num_qualifier_changes | Number of qualifier changes (CREATE, DELETE) | 
-| num_reference_changes | Number of reference changes (CREATE, DELETE) |
-| num_datatype_metadata_changes | Number of datatype metadata changes (CREATE, DELETE, UPDATE) | 
-| num_datatype_metadata_creates | Number of CREATE for datatype metadata changes |
-| num_datatype_metadata_deletes | Number of DELETE for datatype metadata changes |
-| num_datatype_metadata_updates | Number of UPDATE for datatype metadata changes |
-| first_revision_timestamp | First revision timestamp |
-| last_revision_timestamp | First revision timestamp |
-| num_bot_edits | Number of bot edits | 
-| num_anonymous_edits | Number of anonymous edits |
-| num_human_edits | Number of human (registered user) edits |
-| num_reverted_edits | Number of reverted edit changes (CREATE, DELETE, UPDATE) | 
-| num_reversions | Number of reversion changes (CREATE, DELETE, UPDATE) | 
-| num_reverted_edits_create | Number of CREATE for reverted edit changes |
-| num_reverted_edits_delete | Number of DELETE for reverted edit changes |
-| num_reverted_edits_update | Number of UPDATE for reverted edit changes |
-| file_path | file name where the edit history of the entity is stored |
-| total_xml_parse_time_sec | Total time for reading the full page of the entity with all its edit history in seconds |
-| total_process_time_sec | Total time for processing the full edit history of the entity in seconds |
-| total_revision_diff_time_sec | Total time for calculating the diff between revisions in seconds |
-| num_revisions_timed | Number of revisions for which the time for calculating the diff with a consecutive revision was measured |
-| total_rev_edit_time_sec | Total time for reverted edit tagging |
-| total_feature_creation_sec | Total time for feature creation in secons |
-| num_feature_creations_timed | Number of feature creations calls for which the time was measured |
-
-### Feature Tables for Change Classification
-One feature table per datatype: `features_text`, `features_quantity`, `features_time`, `features_entity`, `features_globecoordinate`. 
-Each table stores the features computed for change classification, referencing the corresponding row in `value_change`. 
-Features are datatype-specific.
-For globecoordinate, features are calculated separately for latitude and longitude.
-
-The implementation of features can be found in *parser_scripts/feature_creation.py*.
-
-**`features_time`**
-| Column | Description |
-|---|---|
-| revision_id | ID of the revision |
-| property_id | ID of the property |
-| property_label | label of the property |
-| value_id | ID of the property value |
-| change_target | Indicates what is being modified. Always '' in this table. |
-| entity_label | Entity label. Extracted as the last one. |
-| old_value | Old value of the property value |
-| new_value | New value of the property value |
-| old_datatype | Old datatype of the property value |
-| new_datatype | New datatype of the property value |
-| action | Indicates the action performed: CREATE, UPDATE or DELETE |
-| date_diff_days | Difference between old_value and new_value in days |
-| sign_change | 1 if there's a sign change, 0 otherwise |
-| day_added | 1 if the day was added, 0 otherwise |
-| day_removed | 1 if the day was removed, 0 otherwise |
-| month_added | 1 if the day was added, 0 otherwise |
-| month_removed | 1 if the month was removed, 0 otherwise |
-| different_year | 1 if there's a year change, 0 otherwise |
-| different_month | 1 if there's a month change, 0 otherwise |
-| different_day | 1 if there's a day change, 0 otherwise |
-| label | Change classification label. Can be: *re_formatting*, *property_value_update*, *refinement* or *unrefinement* |
-
-*Primary key:* (revision_id, property_id, value_id, change_target)
-
-*Foreign key:* (revision_id, property_id, value_id, change_target) references value_change(revision_id, property_id, value_id, change_target)
-
-**`features_quantity`**
-| Column | Description |
-|---|---|
-| revision_id | ID of the revision |
-| property_id | ID of the property |
-| property_label | label of the property |
-| value_id | ID of the property value |
-| change_target | Indicates what is being modified. Always '' in this table. |
-| entity_label | Entity label. Extracted as the last one. |
-| old_value | Old value of the property value |
-| new_value | New value of the property value |
-| old_datatype | Old datatype of the property value |
-| new_datatype | New datatype of the property value |
-| action | Indicates the action performed: CREATE, UPDATE or DELETE |
-| sign_change | 1 if there's a sign change, 0 otherwise |
-| precision_change | 1 if there's a precision change, 0 otherwise |
-| length_increase | 1 if there's a length increase, 0 otherwise |
-| length_decrease | 1 if there's a length decrease, 0 otherwise |
-| whole_number_change | 1 if the whole number changes, 0 otherwise |
-| old_is_prefix_of_new | 1 if the old_value is a prefix of the new_value, 0 otherwise |
-| new_is_prefix_of_old | 1 if the new_value is a prefix of the old_value, 0 otherwise |
-| same_float_value | 1 if the new_value and old_value represent the same float value, 0 otherwise |
-| label | Change classification label. Can be: *re_formatting*, *property_value_update*, *refinement* or *unrefinement* |
-
-*Primary key:* (revision_id, property_id, value_id, change_target)
-
-*Foreign key:* (revision_id, property_id, value_id, change_target) references value_change(revision_id, property_id, value_id, change_target)
-
-**`features_globecoordinate`**
-| Column | Description |
-|---|---|
-| revision_id | ID of the revision |
-| property_id | ID of the property |
-| property_label | label of the property |
-| value_id | ID of the property value |
-| change_target | Indicates what is being modified. Always '' in this table. |
-| entity_label | Entity label. Extracted as the last one. |
-| old_value | Old value of the property value |
-| new_value | New value of the property value |
-| old_datatype | Old datatype of the property value |
-| new_datatype | New datatype of the property value |
-| action | Indicates the action performed: CREATE, UPDATE or DELETE |
-| latitude_sign_change | 1 if there's a sign change, 0 otherwise |
-| longitude_sign_change | 1 if there's a sign change, 0 otherwise |
-| latitude_whole_number_change | 1 if the whole number changes, 0 otherwise |
-| longitude_whole_number_change | 1 if the whole number changes, 0 otherwise |
-| latitude_precision_change | 1 if there's a precision change, 0 otherwise |
-| longitude_precision_change | 1 if there's a precision change, 0 otherwise |
-| latitude_length_increase | 1 if there's a length increase, 0 otherwise |
-| latitude_length_decrease | 1 if there's a length decrease, 0 otherwise |
-| longitude_length_increase | 1 if there's a length increase, 0 otherwise |
-| longitude_length_decrease | 1 if there's a length decrease, 0 otherwise |
-| latitude_old_is_prefix_of_new | 1 if the old_value is a prefix of the new_value, 0 otherwise |
-| latitude_new_is_prefix_of_old | 1 if the new_value is a prefix of the old_value, 0 otherwise |
-| latitude_same_float_value | 1 if the new_value and old_value represent the same float value, 0 otherwise |
-| longitude_old_is_prefix_of_new | 1 if the old_value is a prefix of the new_value, 0 otherwise |
-| longitude_new_is_prefix_of_old | 1 if the new_value is a prefix of the old_value, 0 otherwise |
-| longitude_same_float_value | 1 if the new_value and old_value represent the same float value, 0 otherwise |
-| label_latitude | Change classification label. Can be: *re_formatting*, *property_value_update*, *refinement* or *unrefinement* |
-| label_longitude | Change classification label. Can be: *re_formatting*, *property_value_update*, *refinement* or *unrefinement* |
-
-*Primary key:* (revision_id, property_id, value_id, change_target)
-
-*Foreign key:* (revision_id, property_id, value_id, change_target) references value_change(revision_id, property_id, value_id, change_target)
-
-**`features_text`**
-| Column | Description |
-|---|---|
-| revision_id | ID of the revision |
-| property_id | ID of the property |
-| property_label | label of the property |
-| value_id | ID of the property value |
-| change_target | Indicates what is being modified. Always '' in this table. |
-| entity_label | Entity label. Extracted as the last one. |
-| old_value | Old value of the property value |
-| new_value | New value of the property value |
-| old_datatype | Old datatype of the property value |
-| new_datatype | New datatype of the property value |
-| action | Indicates the action performed: CREATE, UPDATE or DELETE |
-| length_diff_abs | Absolute length difference between old_value and new_value |
-| token_count_old | Number of words (token) in old_value |
-| token_count_new | Number of words (token) in new_value |
-| token_overlap | Percentage of word overlap between old_value and new_value |
-| old_in_new | 1 if old_value is contained new_value |
-| new_in_old | 1 if new_value is contained old_value |
-| levenshtein_distance | Levenshtein distance between old_value and new_value |
-| edit_distance_ratio |  levenshtein_distance / max(len(old_value), len(new_value)) |
-| complete_replacement | 1 if (token_overlap == 0 & old_in_new == 0 & new_in_old == 0), otherwise 0 |
-| same_value_without_special_char | 1 if old_value == new_value after removing all special characters ([^a-zA-Z0-9]) |
-| special_char_count_diff | Difference between number of special characters in old_value and new_value |
-| char_insertions | Number of character insertions |
-| char_deletions | Number of character deletions |
-| char_substitutions | Number of character substitutions |
-| adjacent_char_swap | 1 if there's an adjacent character swap, otherwise 0 |
-| has_significant_prefix | 1 if there's a significant prefix share between old_value and new_value (the length of the prefix is >= 3), otherwise 0 |
-| has_significant_suffix | 1 if there's a significant suffix share between old_value and new_value (the length of the prefix is >= 3), otherwise 0 |
-| value_cosine_similarity | cosine similarity between embeddings of old_value and new_value |
-| label | Change classification label. Can be: *re_formatting*, *textual_change*, *property_value_update*, *refinement* or *unrefinement* |
-
-*Primary key:* (revision_id, property_id, value_id, change_target)
-
-*Foreign key:* (revision_id, property_id, value_id, change_target) references value_change(revision_id, property_id, value_id, change_target)
-
-**`features_entity`**
-| Column | Description |
-|---|---|
-| revision_id | ID of the revision |
-| property_id | ID of the property |
-| property_label | label of the property |
-| value_id | ID of the property value |
-| change_target | Indicates what is being modified. Always '' in this table. |
-| entity_label | Entity label. Extracted as the last one. |
-| old_value | Old value of the property value |
-| new_value | New value of the property value |
-| old_datatype | Old datatype of the property value |
-| new_datatype | New datatype of the property value |
-| action | Indicates the action performed: CREATE, UPDATE or DELETE |
-| token_overlap | Percentage of word overlap between old_value and new_value |
-| old_in_new | 1 if old_value is contained new_value |
-| new_in_old | 1 if new_value is contained old_value |
-| edit_distance_ratio |  levenshtein_distance / max(len(old_value), len(new_value)) |
-| complete_replacement | 1 if (token_overlap == 0 & old_in_new == 0 & new_in_old == 0), otherwise 0 |
-| is_link_change | 1 if old_value != new_value and old_value_label == new_value_label, otherwise 0 |
-| label_cosine_similarity | cosine similarity between embeddings of the labels of old_value and new_value |
-| description_cosine_similarity | cosine similarity between embeddings of the descriptions of old_value and new_value |
-| old_value_subclass_new_value | 1 if old_value is subclass of new_value, 0 otherwise |
-| new_value_subclass_old_value | 1 if new_value is subclass of old_value, 0 otherwise |
-| old_value_located_in_new_value | 1 if old_value is located in new_value, 0 otherwise |
-| new_value_located_in_old_value | 1 if new_value is located in old_value, 0 otherwise |
-| old_value_has_parts_new_value | 1 if old_value is has parts new_value, 0 otherwise |
-| new_value_has_parts_old_value | 1 if new_value is has parts old_value, 0 otherwise |
-| old_value_part_of_new_value | 1 if old_value is part of new_value, 0 otherwise |
-| new_value_part_of_old_value | 1 if new_value is part of old_value, 0 otherwise |
-| label | Change classification label. Can be: *re_formatting*, *link_change*, *property_value_update*, *refinement* or *unrefinement* |
-
-*Primary key:* (revision_id, property_id, value_id, change_target)
-
-*Foreign key:* (revision_id, property_id, value_id, change_target) references value_change(revision_id, property_id, value_id, change_target)
-
-**Note:** All table names include a `{suffix}` placeholder, which is replaced at runtime for the different filters of entity types in `set_up.yml`. The values for this suffix can be: `_sa` (scholarly articles), `_ao` (astronomical objects), `_less` (entities with less than *threshold* value changes)
-
 ## Transitive Closure Cache Creation
 The transitive closure cache is required for ML-based change classification. It loads the transitive closure CSV files produced by `ExtractTransitiveClosure.java` into memory and serializes them as a pickle file for fast access during feature computation.
 
@@ -682,63 +737,8 @@ The transitive closure cache is required for ML-based change classification. It 
 To create the cache, run:
 
 ```bash
-from parser_scripts.transitive_closure_cache import TransitiveClosure
-cache = TransitiveClosure()
+from classifiers.rule.transitive_closure_cache import TransitiveClosureCache
+cache = TransitiveClosureCache()
 ```
 
 **Note:** Cache creation is slow and memory-intensive (the full cache can reach several GB). It only needs to be run once — subsequent runs load directly from the pickle file.
-
----
-
-## Compute Remaining Features
-Some features cannot be computed during change extraction and must be calculated in a separate step. This currently includes embedding-based similarity and transitive closure features, which require a language model or the transitive closure cache and are too expensive to compute inline during parsing.
-
-Therefore, the transitive closures must be extracted before running this step. The cache doesn't need to be created beforehand (if it's not created it will be created, but this takes sometime).
-
-This step uses the *all-MiniLM-L6-v2* sentence transformer model, which is downloaded automatically on first run. A GPU is not required but significantly speeds up computation. If a CUDA-compatible GPU is available it will be used automatically, otherwise the script falls back to CPU (`device = "cuda" if torch.cuda.is_available() else "cpu"`).
-
-For embedding-based features for entity changes, the labels and descriptions of `old_value` and `new_value` must be added. For this, enable *update_entity_labels_descriptions* to true in `set_up.yml` before running this script. Note that this script assumers there exists a table named `entity_labels_alias_description` in the database with the following schema (qid, numeric_id, label, alias, description) (*entity_labels_alias_description.csv* extracted with the Wikidata-Toolkit).
-
-*Note:* The remaining features can be computed for the different tables, call the script with the corresponding table_suffix ('ao', 'sa', 'rest', 'less').
-
-To compute the remaining features, run from root:
-
-```bash
-python3 -m parser_scripts.compute_remaining_features --table_suffix rest
-```
-
-This script reads from the `features_text` and `features_entity` tables in the database and writes the computed values back. It must be run after change extraction with `feature_extraction: true` and before running the ML classifier.
-
-## Descriptive Analysis
-Descriptive analysis scripts are provided in `analysis/scripts.py`. Each analysis can be enabled and configured independently in `setup.yml` under the `analysis` section:
-
-```yaml
-analysis:
-  distribution_of_revisions_value_changes:
-    execute: true   # set to true to run this analysis
-    reload_data: false  # set to true to re-run the SQL query and overwrite stored results in analysis/results/
-  entity_types_analysis:
-    execute: true
-    reload_data: false
-  property_stats:
-    execute: true
-    reload_data: false
-```
-
-To run the analysis, simply execute from root:
-
-```bash
-python3 -m analysis.scripts.general_analysis
-```
-
-| Analysis | Description |
-|---|---|
-| `distribution_of_revisions_value_changes` | Distribution of revisions and value changes across all entities |
-| `entity_types_analysis` | Largest entity types, most edited entity types and user type breakdown for the latter |
-| `property_stats` | Most edited properties (wrt. number of entities that have a change to that entity) and type of action distribution |
-
-Output figures are saved to `analysis/results/figures/`.
-
-We provide datasets to run this analysis ([WiDiff: Analysis Results from Wikidata Edit History Dump (June 2025)](https://doi.org/10.5281/zenodo.19771569)). Download the *widiff_analysis_results_20250601.zip* and put the .csv files in the folder `analysis/results/`.
-
-**Note:** Set `reload_data: true` (if you want to obtain fresh results and not use the ones provided in [WiDiff: Analysis Results from Wikidata Edit History Dump (June 2025)](https://doi.org/10.5281/zenodo.19771569)) to execute the SQL queries and store the results. Subsequent runs can use `reload_data: false` to load from the stored results.

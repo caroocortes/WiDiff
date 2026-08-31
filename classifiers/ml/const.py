@@ -40,3 +40,83 @@ CLASSES_PER_DATATYPE = {
 WD_STRING_TYPES = ['monolingualtext', 'string', 'external-id', 'url', 'commonsMedia', 'geo-shape', 'tabular-data', 'math', 'musical-notation', 'unknown-values']
 WD_ENTITY_TYPES = ['wikibase-item', 'wikibase-entityid', 'wikibase-property', 'wikibase-lexeme', 'wikibase-sense', 'wikibase-form', 'entity-schema']
 WD_BASIC_TYPES = ['globecoordinate_latitude', 'globecoordinate_longitude', 'quantity', 'time']
+
+ENTITY_SIMPLE_FEATURES_TYPES = {
+    'token_overlap': 'FLOAT',
+    'old_in_new': 'INT',
+    'new_in_old': 'INT',
+    'complete_replacement': 'INT',
+    'word_alignment_ratio': 'FLOAT',
+    'word_insertions': 'INT',
+    'word_deletions': 'INT',
+    'word_substitutions': 'INT',
+    'has_significant_prefix': 'INT',
+    'has_significant_suffix': 'INT'
+}
+
+ENTITY_EMBEDDING_FEATURE_COLS = {
+    'label_cosine_similarity': 'FLOAT', 
+    'description_cosine_similarity': 'FLOAT',
+
+    'old_to_new_contradiction': 'FLOAT',
+    'old_to_new_entailment': 'FLOAT', 
+    'old_to_new_neutral': 'FLOAT',
+    'new_to_old_contradiction': 'FLOAT', 
+    'new_to_old_entailment': 'FLOAT', 
+    'new_to_old_neutral': 'FLOAT',
+
+    'old_to_new_desc_contradiction': 'FLOAT', 
+    'old_to_new_desc_entailment': 'FLOAT', 
+    'old_to_new_desc_neutral': 'FLOAT',
+    'new_to_old_desc_contradiction': 'FLOAT', 
+    'new_to_old_desc_entailment': 'FLOAT', 
+    'new_to_old_desc_neutral': 'FLOAT'
+}
+
+BASE_KEY_TYPES = {
+    'revision_id': 'BIGINT',
+    'property_id': 'INT',
+    'value_id': 'TEXT'
+}
+
+TEXT_SIMPLE_FEATURE_COLS = [
+    
+    'token_overlap',
+    'old_in_new',
+    'new_in_old',
+    'complete_replacement',
+    'word_alignment_ratio',
+    'word_insertions',
+    'word_deletions',
+    'word_substitutions',
+    'has_significant_prefix',
+    'has_significant_suffix',
+
+    'word_count_old',
+    'word_count_new',
+    'special_char_count_diff',
+    'whitespace_count_diff',
+    'accent_char_count_diff',
+    'case_swap_count',
+    'char_insertions',
+    'char_deletions',
+    'char_substitutions',
+    'adjacent_char_swap',
+    'raw_edit_distance_ratio',
+    'residual_edit_distance_ratio',
+    'stopword_diff_ratio',
+    'plural_pair_ratio',
+    'other_word_diff_count',
+    'other_word_ratio'
+]
+
+TEXT_EMBEDDING_FEATURE_COLS = [
+    'value_cosine_similarity',
+
+    'old_to_new_contradiction',
+    'old_to_new_entailment', 
+    'old_to_new_neutral',
+    'new_to_old_contradiction', 
+    'new_to_old_entailment', 
+    'new_to_old_neutral',
+]

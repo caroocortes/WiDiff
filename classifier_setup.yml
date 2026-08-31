@@ -1,0 +1,29 @@
+config:
+  db_config_path: config/aux_db_config.json
+  classifier_type: ml # or llm
+classification_ml:
+  train: false
+  classify: true
+  evaluate: false
+  table_suffix: ''
+classification_llm:
+  path_to_entity_changes: classifiers/ml/training_dataset/gs_entity.csv
+  path_to_text_changes: classifiers/ml/training_dataset/gs_text.csv
+transitive_closure_cache:
+  has_part_transitive_path: auxiliary_data/transitive_closures/has_parts_transitive.csv
+  located_in_transitive_path: auxiliary_data/transitive_closures/located_in_transitive.csv
+  part_of_transitive_path: auxiliary_data/transitive_closures/part_of_transitive.csv
+  subclass_transitive_path: auxiliary_data/transitive_closures/subclass_of_transitive.csv
+  transitive_closure_pickle_file_path: auxiliary_data/transitive_closures/transitive_closure_cache.pkl
+  transitive_closure_stats_pickle_file_path: auxiliary_data/transitive_closures/transitive_closure_stats.pkl
+update_entity_labels_descriptions: true
+separate_non_latin_entity: true
+separate_non_latin_text: true
+analysis:
+  distribution_change_types:
+    execute: true
+    reload_data: false
+  change_types_overtime:
+    execute: false
+    reload_data: false
+  

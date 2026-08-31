@@ -16,7 +16,7 @@ class PageParser():
     def __init__(
             self, 
             file_id, 
-            page_elem_str, 
+            page_data, 
             set_up, 
             astronomical_object_types, 
             scholarly_article_types
@@ -66,7 +66,7 @@ class PageParser():
 
         self.file_id = file_id # file_id of XML where the page is stored
 
-        self.page_elem = etree.fromstring(page_elem_str) # XML page for the entity
+        self.page_data = page_data # XML page for the entity
 
         ######### TIME MEASUREMENT #########
         self.total_feature_creation_sec = 0
@@ -135,7 +135,7 @@ class PageParser():
             elif action == 'UPDATE':
                 self.entity_stats['num_rank_updates'] += 1
 
-    def _parse_json_revision(self, revision_elem, revision_text):
+    def _parse_json_revision(self, revision_text):
         # TODO: remove revision_elem from args - only for debugging
         """
             Returns the text of a revision as a json
@@ -163,12 +163,7 @@ class PageParser():
             with open(ERROR_REVISION_TEXT_PATH, "a") as f:
                 f.write(f"-------------------------------------------\n")
                 f.write(f"Revision {self.revision_meta['revision_id']} for entity {self.revision_meta['entity_id']}:\n")
-                revision_xml_str = etree.tostring(
-                    revision_elem,
-                    pretty_print=True,
-                    encoding="unicode" 
-                )
-                f.write(revision_xml_str + "\n")
+                f.write(revision_text.strip() + "\n")
                 f.write(f"-------------------------------------------\n")
             return None
 
@@ -520,6 +515,12 @@ class PageParser():
         if self.set_up.get('re_interpretation', False) and action == 'CREATE':
             if qual_property_id in [582, 8554, 12506, 3416]:
                 label = 'soft_deletion'
+
+        if self.set_up.get('re_interpretation', False):
+            if action == 'CREATE':
+                label = 'qualifier_insertion'
+            elif action == 'DELETE':
+                label = 'qualifier_deletion'
         
         change = (
             self.revision_meta['revision_id'],
@@ -549,7 +550,14 @@ class PageParser():
 
         action = change_type
         timestamp = self.revision_meta['timestamp']
+
         label = ''
+        if self.set_up.get('re_interpretation', False):
+            if action == 'CREATE':
+                label = 'reference_insertion'
+            elif action == 'DELETE':
+                label = 'reference_deletion'
+
         change = (
             self.revision_meta['revision_id'],
             property_id,
@@ -1349,14 +1357,7 @@ class PageParser():
             prev_desc = PageParser._safe_get_nested(previous_revision, 'descriptions', self.language, 'value')
         curr_desc = PageParser._safe_get_nested(current_revision, 'descriptions', self.language, 'value')
 
-        if self.revision_meta.get('entity_id') == 25104771 and self.revision_meta.get('revision_id') in [1279154838, 1279154833]:
-            print('Current description: ', curr_desc)
-            print('Previous description: ', prev_desc)
-            print('If check: curr_desc != prev_desc', curr_desc != prev_desc)
-
         if curr_desc != prev_desc:
-            if self.revision_meta.get('entity_id') == 25104771 and self.revision_meta.get('revision_id') in [1279154838, 1279154833]:
-                print('Description change detected!')
 
             change_detected = True
             old_value = prev_desc if not isinstance(prev_desc, dict) else None
@@ -1713,24 +1714,12 @@ class PageParser():
 
         start_parse_time = time.time()
 
-        # TODO: remove
-        title_tag = f"{{{NS}}}title"
-        revision_tag = f'{{{NS}}}revision'
-        revision_text_tag = f'{{{NS}}}text'
-
-        entity_id = ''
-
         previous_revision = None
 
         last_non_deleted_revision_id = -1
         prev_revision_deleted = False
 
-        # TODO get from dict
-        # Extract title = entity_id
-        title_elem = self.page_elem.find(title_tag)
-        if title_elem is not None:
-            entity_id = (title_elem.text or '').strip()
-
+        entity_id = self.page_data.entity_id
         self.entity_stats['qid'] = entity_id
 
         entity_id = id_to_int(entity_id) # convert Q-ID to integer (remove the 'Q')
@@ -1742,21 +1731,20 @@ class PageParser():
         num_revisions_timed = 0
 
         # Iterate over revisions
-        for rev_elem in self.page_elem.findall(revision_tag):
+        for rev_data in self.page_data.revisions:
 
-            revision_id = int(rev_elem.findtext(f'{{{NS}}}id', '').strip()) # revision id
-            revision_text_elem = rev_elem.find(revision_text_tag) # revision <text></text>
+            revision_id = rev_data.revision_id # revision id
+            revision_text_elem = rev_data.revision_text # revision <text></text>
             if revision_text_elem is not None:
                 # If the revision was deleted the text tag looks like: <text bytes="11179" sha1="ou0t1tihux9rw2wb939kv22axo3h2uh" deleted="deleted"/>
                 # and there's no content inside
                 
-                deleted_attr = revision_text_elem.get("deleted")
+                deleted_attr = rev_data.deleted
                 if not deleted_attr: # Revision was not deleted
                     
                     # Extract text, id, timestamp, comment, username, user_id
-                    contrib_elem = rev_elem.find(f'{{{NS}}}contributor')
 
-                    prev_revision_id = rev_elem.findtext(f'{{{NS}}}parentid', '').strip()
+                    prev_revision_id = rev_data.parentid
                     if prev_revision_id and not prev_revision_deleted:
                         prev_revision_id = int(prev_revision_id)
                     elif prev_revision_deleted:
@@ -1766,13 +1754,10 @@ class PageParser():
 
                     if prev_revision_deleted:
                         prev_revision_deleted = False
-                
-                    if contrib_elem is not None:
-                        username = (contrib_elem.findtext(f'{{{NS}}}username') or '').strip()
-                        user_id = (contrib_elem.findtext(f'{{{NS}}}id') or '').strip()
-                    else:
-                        username = ''
-                        user_id = ''
+
+                    
+                    username = rev_data.username
+                    user_id = rev_data.user_id
 
                     user_type = ''
                     if 'bot' in username.lower():
@@ -1787,8 +1772,8 @@ class PageParser():
                         'entity_id': entity_id,
                         'revision_id': revision_id,
                         'prev_revision_id': prev_revision_id if prev_revision_id else '-1', # for the first revision (doesn't have a parentid)
-                        'timestamp': rev_elem.findtext(f'{{{NS}}}timestamp', '').strip(),
-                        'comment': rev_elem.findtext(f'{{{NS}}}comment', '').strip(),
+                        'timestamp': rev_data.timestamp,
+                        'comment': rev_data.comment,
                         'file_id': self.file_id,
                         'user_id': user_id,
                         'username': username,
@@ -1796,10 +1781,10 @@ class PageParser():
                     }
 
                     # decode content inside <text></text>
-                    if revision_text_elem.text:
-                        current_revision = self._parse_json_revision(rev_elem, (revision_text_elem.text).strip())
+                    if revision_text_elem:
+                        current_revision = self._parse_json_revision(revision_text_elem.strip())
                     
-                    if current_revision is None or revision_text_elem.text is None:
+                    if current_revision is None or revision_text_elem is None:
                         # The json parsing for the revision text failed.
                         change = False
                     else:
@@ -1850,7 +1835,7 @@ class PageParser():
                             self.revision_meta['user_type'],
                             self.revision_meta['comment'],
                             self.file_id,
-                            extract_redirect_qid((revision_text_elem.text).strip()) if self.current_revision_redirect else ''
+                            extract_redirect_qid((revision_text_elem).strip()) if self.current_revision_redirect else ''
                         ))
 
                         if user_type == 'bot':
@@ -1880,14 +1865,9 @@ class PageParser():
                     prev_revision_deleted = True
 
             # free memory
-            rev_elem.clear()
+            del rev_data
 
         end_time_parse = time.time()
-        
-        # Clear element to free memory
-        self.page_elem.clear()
-        while self.page_elem.getprevious() is not None:
-            del self.page_elem.getparent()[0]
 
         ## -------------------------------------------------- ##
         # Tag reverted edits
@@ -1939,7 +1919,10 @@ class PageParser():
         self.entity_stats['entity_description'] = self.entity_data['description'] if self.entity_data['description'] else ''
         
         str_list = ', '.join(list_of_types_31)
+        list_of_types_279 = list(set([type_id for val_id, type_id in self.entity_data['p279_types']]))
+        str_list = ', '.join(list_of_types_279)
         self.entity_stats['entity_types_31'] = str_list
+        self.entity_stats['entity_types_279'] = str_list
         
         self.entity_stats['first_revision_timestamp'] = self.revision[0][3] if len(self.revision) > 0 else None # timestamp is at position 3 in the tuple
         self.entity_stats['last_revision_timestamp'] = self.revision[-1][3] if len(self.revision) > 0 else None

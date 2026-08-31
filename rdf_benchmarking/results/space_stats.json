@@ -1,0 +1,98 @@
+{
+    "snapshots": [
+        {
+            "label": "snapshot",
+            "checked_at": "2026-08-31 13:11:36",
+            "postgresql": {
+                "database_bytes": 6893927447,
+                "database_pretty": "6.4GB",
+                "tables": {
+                    "revision": {
+                        "table_bytes": 925237248,
+                        "index_bytes": 126001152,
+                        "total_bytes": 1051238400,
+                        "table_pretty": "882.4MB",
+                        "index_pretty": "120.2MB",
+                        "total_pretty": "1002.5MB"
+                    },
+                    "rank_change": {
+                        "table_bytes": 445472768,
+                        "index_bytes": 348971008,
+                        "total_bytes": 794443776,
+                        "table_pretty": "424.8MB",
+                        "index_pretty": "332.8MB",
+                        "total_pretty": "757.6MB"
+                    },
+                    "value_change": {
+                        "table_bytes": 695435264,
+                        "index_bytes": 478699520,
+                        "total_bytes": 1174134784,
+                        "table_pretty": "663.2MB",
+                        "index_pretty": "456.5MB",
+                        "total_pretty": "1.1GB"
+                    },
+                    "qualifier_change": {
+                        "table_bytes": 237764608,
+                        "index_bytes": 196591616,
+                        "total_bytes": 434356224,
+                        "table_pretty": "226.8MB",
+                        "index_pretty": "187.5MB",
+                        "total_pretty": "414.2MB"
+                    },
+                    "reference_change": {
+                        "table_bytes": 1852702720,
+                        "index_bytes": 1548910592,
+                        "total_bytes": 3401613312,
+                        "table_pretty": "1.7GB",
+                        "index_pretty": "1.4GB",
+                        "total_pretty": "3.2GB"
+                    },
+                    "properties": {
+                        "table_bytes": 819200,
+                        "index_bytes": 311296,
+                        "total_bytes": 1130496,
+                        "table_pretty": "800.0KB",
+                        "index_pretty": "304.0KB",
+                        "total_pretty": "1.1MB"
+                    },
+                    "entities": {
+                        "table_bytes": 21405696,
+                        "index_bytes": 6209536,
+                        "total_bytes": 27615232,
+                        "table_pretty": "20.4MB",
+                        "index_pretty": "5.9MB",
+                        "total_pretty": "26.3MB"
+                    },
+                    "users": {
+                        "table_bytes": 811008,
+                        "index_bytes": 344064,
+                        "total_bytes": 1155072,
+                        "table_pretty": "792.0KB",
+                        "index_pretty": "336.0KB",
+                        "total_pretty": "1.1MB"
+                    },
+                    "file_paths": {
+                        "table_bytes": 16384,
+                        "index_bytes": 16384,
+                        "total_bytes": 32768,
+                        "table_pretty": "16.0KB",
+                        "index_pretty": "16.0KB",
+                        "total_pretty": "32.0KB"
+                    }
+                }
+            },
+            "qlever": {
+                "index_bytes": 1949200918,
+                "index_pretty": "1.8GB",
+                "num_index_files": 18,
+                "vocabulary_bytes": 1804680424,
+                "vocabulary_pretty": "1.7GB",
+                "ttl_source_bytes": 13659203922,
+                "ttl_source_pretty": "12.7GB",
+                "num_ttl_files": 1,
+                "total_on_disk_bytes": 3753881342,
+                "total_on_disk_pretty": "3.5GB"
+            }
+        }
+    ]
+}

@@ -5,17 +5,12 @@ CREATE TABLE IF NOT EXISTS revision{suffix} (
     prev_revision_id BIGINT,
     revision_id BIGINT,
     entity_id INT,
-    entity_label TEXT,
-    file_path TEXT,
     timestamp TIMESTAMP WITH TIME ZONE,
-    week varchar(255),
-    year_month varchar(255),
-    year varchar(255),
     user_id TEXT,
     username TEXT,
     user_type TEXT,
     comment TEXT,
-    redirect BOOLEAN,
+    file_id INT,
     q_id_redirect TEXT,
     PRIMARY KEY (revision_id)
 );
@@ -23,84 +18,74 @@ CREATE TABLE IF NOT EXISTS revision{suffix} (
 CREATE TABLE IF NOT EXISTS value_change{suffix} (
     revision_id BIGINT,
     property_id INT,
-    property_label TEXT,
     value_id TEXT,
     old_value JSONB,
     new_value JSONB,
-    old_datatype TEXT,
-    new_datatype TEXT,
-    change_target TEXT, -- can be '' (value), p-id of qualifier, 'rank', name of datatype metadata (e.g. 'upperBound' for quantity)
-    action TEXT,
-    target TEXT,
-    old_hash TEXT,
-    new_hash TEXT,
+    old_datatype datatype_enum,
+    new_datatype datatype_enum,
+    action action_enum,
     timestamp TIMESTAMP WITH TIME ZONE,
-    week varchar(255),
-    year_month varchar(255),
-    year varchar(255),
+    label TEXT,
+    branch TEXT,
+    entity_id INT,
+    is_reverted INT,
+    reversion INT,
+    reversion_timestamp TIMESTAMP WITH TIME ZONE DEFAULT NULL,
+    revision_id_reversion BIGINT DEFAULT NULL,
+    PRIMARY KEY (revision_id, property_id, value_id)
+);
+
+CREATE TABLE IF NOT EXISTS rank_change{suffix} (
+    revision_id BIGINT,
+    property_id INT,
+    value_id TEXT,
+    old_value JSONB,
+    new_value JSONB,
+    action action_enum,
+    timestamp TIMESTAMP WITH TIME ZONE,
     label TEXT,
     entity_id INT,
     is_reverted INT,
     reversion INT,
     reversion_timestamp TIMESTAMP WITH TIME ZONE DEFAULT NULL,
     revision_id_reversion BIGINT DEFAULT NULL,
-    entity_label TEXT,
-    PRIMARY KEY (revision_id, property_id, value_id, change_target),
-    FOREIGN KEY (revision_id) REFERENCES revision{suffix}(revision_id)
+    PRIMARY KEY (revision_id, property_id, value_id)
 );
 
 CREATE TABLE IF NOT EXISTS qualifier_change{suffix} (
     revision_id BIGINT,
     property_id INT, -- statement property id
-    property_label TEXT,
     value_id TEXT, -- statement value id
     qual_property_id INT, -- qualifier property id
-    qual_property_label TEXT,
     value_hash TEXT, -- hash of qualifier value. This hash + qual_property_id identify each qualifier value
     old_value JSONB,
     new_value JSONB,
-    old_datatype TEXT,
-    new_datatype TEXT,
-    change_target TEXT, -- will be '' or datatype metadata name
-    action TEXT, -- Will only be CREATE/DELETE, never UPDATE
-    target TEXT,
+    old_datatype datatype_enum,
+    new_datatype datatype_enum,
+    action action_enum, -- Will only be CREATE/DELETE, never UPDATE
     timestamp TIMESTAMP WITH TIME ZONE,
-    week varchar(255),
-    year_month varchar(255),
-    year varchar(255),
     label TEXT,
     entity_id INT,
-    entity_label TEXT,
-    PRIMARY KEY (revision_id, property_id, value_id, qual_property_id, value_hash, change_target),
-    FOREIGN KEY (revision_id) REFERENCES revision{suffix}(revision_id)
+    PRIMARY KEY (revision_id, property_id, value_id, qual_property_id, value_hash)
     -- NOTE: revision_id, property_id, value_id does not necessarily exist in value_change since a revision could involve only reference/qualifier changes
 );
 
 CREATE TABLE IF NOT EXISTS reference_change{suffix} (
     revision_id BIGINT,
     property_id INT, -- statement property id
-    property_label TEXT,
     value_id TEXT, -- statement value id
     ref_property_id INT, -- reference property id
-    ref_property_label TEXT,
     ref_hash TEXT, -- identifies the reference (a reference is composed of multiple property - values)
     value_hash TEXT, -- hash of reference value. This hash + ref_property_id identify each reference value
     old_value JSONB,
     new_value JSONB,
-    old_datatype TEXT,
-    new_datatype TEXT,
-    change_target TEXT, -- will be '' or datatype metadata name
-    action TEXT, -- Will only be CREATE/DELETE, never UPDATE
-    target TEXT,
+    old_datatype datatype_enum,
+    new_datatype datatype_enum,
+    action action_enum, -- Will only be CREATE/DELETE, never UPDATE
     timestamp TIMESTAMP WITH TIME ZONE,
-    week varchar(255),
-    year_month varchar(255),
-    year varchar(255),
     label TEXT,
     entity_id INT,
-    entity_label TEXT,
-    PRIMARY KEY (revision_id, property_id, value_id, ref_hash, ref_property_id, value_hash, change_target),
-    FOREIGN KEY (revision_id) REFERENCES revision{suffix}(revision_id)
+    PRIMARY KEY (revision_id, property_id, value_id, ref_hash, ref_property_id, value_hash)
     -- NOTE: revision_id, property_id, value_id does not necessarily exist in value_change since a revision could involve only reference/qualifier changes
 );
 
@@ -110,8 +95,11 @@ CREATE TABLE IF NOT EXISTS reference_change{suffix} (
 --- #####################################################
 CREATE TABLE IF NOT EXISTS entity_stats{suffix} (
     entity_id INT PRIMARY KEY,
+    qid TEXT,
     entity_label TEXT,
+    entity_description TEXT,
     entity_types_31 TEXT,
+    entity_types_279 TEXT,
     
     num_revisions INT,
     
@@ -146,7 +134,7 @@ CREATE TABLE IF NOT EXISTS entity_stats{suffix} (
     num_reverted_edits_delete INT,
     num_reverted_edits_update INT,
 
-    file_path TEXT,
+    file_id INT,
 
     total_xml_parse_time_sec FLOAT,
     total_process_time_sec FLOAT,
@@ -157,5 +145,7 @@ CREATE TABLE IF NOT EXISTS entity_stats{suffix} (
     total_rev_edit_time_sec FLOAT,
 
     total_feature_creation_sec FLOAT,
-    num_feature_creations_timed INT
+    num_feature_creations_timed INT,
+
+    total_rule_based_classification_sec FLOAT
 );

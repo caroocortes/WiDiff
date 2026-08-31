@@ -1,24 +1,17 @@
 CREATE TABLE IF NOT EXISTS datatype_metadata_change{suffix} (
     revision_id BIGINT,
     property_id INT,
-    property_label TEXT,
     value_id TEXT,
-    old_value JSONB,
-    new_value JSONB,
-    old_datatype TEXT,
-    new_datatype TEXT,
+    old_value JSONB,  -- change of the datatype metadata (e.g. oldvalue of upperBound for quantity)
+    new_value JSONB, -- change of the datatype metadata (e.g. newvalue of upperBound for quantity)
+    old_datatype datatype_enum,
+    new_datatype datatype_enum,
     change_target TEXT, --name of datatype metadata (e.g. 'upperBound' for quantity)
-    action TEXT,
+    action action_enum,
     target TEXT,
-    old_hash TEXT,
-    new_hash TEXT,
     timestamp TIMESTAMP WITH TIME ZONE,
-    week varchar(255),
-    year_month varchar(255),
-    year varchar(255),
     label TEXT,
     entity_id INT,
-    entity_label TEXT,
     PRIMARY KEY (revision_id, property_id, value_id, change_target),
     FOREIGN KEY (revision_id) REFERENCES revision{suffix}(revision_id)
 );

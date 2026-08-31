@@ -5,13 +5,12 @@ from pathlib import Path
 import yaml
 import pickle
 
-from parser_scripts.const import SETUP_PATH
-
 class TransitiveClosureCache:
     def __init__(self):
 
         script_dir = Path(__file__).parent
-        with open(script_dir.parent.parent / Path(SETUP_PATH), 'r') as f:
+        set_up_path = script_dir.parent.parent / Path('classifier_setup.yml')
+        with open(set_up_path, 'r') as f:
             set_up = yaml.safe_load(f)
 
         csv_paths = {
@@ -21,8 +20,8 @@ class TransitiveClosureCache:
             'located_in_transitive': set_up['transitive_closure_cache']['located_in_transitive_path'],
         }
 
-        transitive_closure_pickle_file_path = Path(set_up['transitive_closure_cache']['transitive_closure_pickle_file_path'])
-        transitive_closure_stats_pickle_file_path = Path(set_up['transitive_closure_cache']['transitive_closure_stats_pickle_file_path'])
+        transitive_closure_pickle_file_path = Path(script_dir.parent.parent / set_up['transitive_closure_cache']['transitive_closure_pickle_file_path'])
+        transitive_closure_stats_pickle_file_path = Path(script_dir.parent.parent / set_up['transitive_closure_cache']['transitive_closure_stats_pickle_file_path'])
         self.cache = {}
         self.cache_stats = dict()
 

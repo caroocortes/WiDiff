@@ -16,8 +16,8 @@ echo "Starting file processing at $(date)" >> "$LOG_FILE"
 echo "PID: $$" >> "$LOG_FILE"
 echo "Target files: $NUM_FILES" >> "$LOG_FILE"
 
-# python3 -m extract_changes -n "$NUM_FILES" >> "$LOG_FILE" 2>&1
-python3 -m extract_changes -f wikidatawiki-20250601-pages-meta-history9.xml-p12293632p12341782.bz2 >> "$LOG_FILE" 2>&1
+python3 -m extract_changes -n "$NUM_FILES" >> "$LOG_FILE" 2>&1
+# python3 -m extract_changes -f wikidatawiki-20250601-pages-meta-history9.xml-p12293632p12341782.bz2 >> "$LOG_FILE" 2>&1
 EXIT_CODE=$?
 
 if [ $EXIT_CODE -ne 0 ]; then

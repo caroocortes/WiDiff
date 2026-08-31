@@ -1,0 +1,125 @@
+{
+    "postgresql": {
+        "preflight": {
+            "host": "10.130.31.28",
+            "port": 5434,
+            "database": "test_rdf",
+            "database_size_pretty": "7519 kB",
+            "settings": {
+                "max_connections": "50",
+                "shared_buffers": "32GB",
+                "effective_cache_size": "96GB",
+                "work_mem": "256MB",
+                "maintenance_work_mem": "4GB",
+                "wal_buffers": "16MB",
+                "checkpoint_timeout": "15min",
+                "max_wal_size": "16GB",
+                "min_wal_size": "4GB",
+                "checkpoint_completion_target": "0.9",
+                "max_worker_processes": "16",
+                "max_parallel_workers_per_gather": "4",
+                "max_parallel_workers": "16",
+                "autovacuum": "on",
+                "autovacuum_max_workers": "4",
+                "autovacuum_naptime": "10s",
+                "log_min_duration_statement": "5s"
+            },
+            "other_databases_with_active_connections": {},
+            "contention_warning": false,
+            "checked_at": "2026-08-31 12:54:47"
+        },
+        "file_paths": {
+            "num_file_paths": 10,
+            "load_time_sec": 0.06172514148056507
+        },
+        "properties": {
+            "num_properties": 13067,
+            "load_time_sec": 0.06428158469498158
+        },
+        "entities": {
+            "num_entities": 275239,
+            "load_time_sec": 0.3816569894552231
+        },
+        "users": {
+            "num_users": 14379,
+            "load_time_sec": 0.06820667162537575
+        },
+        "revision": {
+            "num_revisions": 5608842,
+            "load_time_sec": 27.08775528613478
+        },
+        "value_change": {
+            "num_value_changes": 5884427,
+            "load_time_sec": 17.536305923946202
+        },
+        "rank_change": {
+            "num_rank_changes": 4096717,
+            "load_time_sec": 11.176890399307013
+        },
+        "qualifier_change": {
+            "num_qualifier_changes": 1413810,
+            "load_time_sec": 5.836560828611255
+        },
+        "reference_change": {
+            "num_reference_changes": 8248333,
+            "load_time_sec": 36.73762402217835
+        },
+        "index_creation_time_sec": 56.3886053012684
+    },
+    "triples_creation": {
+        "users": {
+            "num_triples": 28787,
+            "num_entities": 14379,
+            "serialization_time_sec": 0.0543208122253418
+        },
+        "entities": {
+            "num_triples": 275239,
+            "num_entities": 275239,
+            "serialization_time_sec": 0.35422849655151367
+        },
+        "file_paths": {
+            "num_triples": 10,
+            "num_files": 10,
+            "serialization_time_sec": 2.3126602172851562e-05
+        },
+        "properties": {
+            "num_triples": 13067,
+            "num_properties": 13067,
+            "serialization_time_sec": 0.015512466430664062
+        },
+        "revision": {
+            "num_triples": 33362981,
+            "num_revisions": 5608842,
+            "serialization_time_sec": 80.09863638877869
+        },
+        "value_change": {
+            "num_triples": 41603599,
+            "num_value_changes": 5884427,
+            "serialization_time_sec": 26.13495635986328
+        },
+        "rank_change": {
+            "num_triples": 24610698,
+            "num_rank_changes": 4096717,
+            "serialization_time_sec": 14.843961715698242
+        },
+        "qualifier_change": {
+            "num_triples": 12724290,
+            "num_qualifier_changes": 1413810,
+            "serialization_time_sec": 7.571906566619873
+        },
+        "reference_change": {
+            "num_triples": 82483330,
+            "num_reference_changes": 8248333,
+            "serialization_time_sec": 48.76826238632202
+        }
+    },
+    "qlever": {
+        "preflight": {
+            "stxxl_memory": "96G",
+            "mem_budget": "128GB",
+            "cpu_budget": "16",
+            "checked_at": "2026-08-31 13:07:25"
+        },
+        "loading_index_creation_time_sec": 171
+    }
+}
