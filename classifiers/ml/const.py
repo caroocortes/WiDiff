@@ -1,5 +1,5 @@
-ML_MODELS = ['kn', 'random_forest','xgboost']
-ML_MODELS_LABELS = ['K-Neighbors', 'Random Forest', 'XGBoost']
+ML_MODELS = ['gb', 'random_forest','xgboost']
+ML_MODELS_LABELS = ['Gradient Boosting', 'Random Forest', 'XGBoost']
 
 # ===============================
 #  Paths 
@@ -14,7 +14,7 @@ SQL_SCRIPT_DIR = 'analysis/sql'
 RESULTS_DIR = 'analysis/results'
 LOGS_DIR = 'analysis/logs'
 
-YAML_SETUP_PATH = 'set_up.yml'
+YAML_SETUP_PATH = 'classifier_setup.yml'
 
 BASE_KEY_TYPES = {
     'revision_id': 'BIGINT',
@@ -23,35 +23,35 @@ BASE_KEY_TYPES = {
 }
 
 
-BASIC_CHANGE_LABELS = ['textual_change', 're_formatting', 'refinement', 'unrefinement', 'property_value_update', 'link_change', 'rewording']
+BASIC_CHANGE_LABELS = ['textual_change','refinement', 'unrefinement', 'property_value_update']
 
 SOFT_INSERTIONS = 'soft_insertions' # normal/deprecated -> preferred 
 SOFT_DELETIONS = 'soft_deletions' # rank deprecation (normal/prefered -> deprecated) + adding end time qualifier
 
 CLASSES_PER_DATATYPE = {
-    'text': ['textual_change', 're_formatting', 'refinement', 'unrefinement', 'property_value_update'],
+    'text': ['textual_change', 'refinement', 'unrefinement', 'property_value_update'],
     'quantity': ['refinement', 'unrefinement', 'property_value_update', 're_formatting'],
-    'time': ['refinement', 'unrefinement', 'property_value_update'],
-    'globecoordinate_latitude': ['refinement', 'unrefinement', 'property_value_update'],
-    'globecoordinate_longitude': ['refinement', 'unrefinement', 'property_value_update'],
-    'entity': ['refinement', 'unrefinement', 'property_value_update', 'link_change'] 
+    'time': ['refinement', 'unrefinement', 'property_value_update', 're_formatting'],
+    'globecoordinate_latitude': ['refinement', 'unrefinement', 'property_value_update', 're_formatting'],
+    'globecoordinate_longitude': ['refinement', 'unrefinement', 'property_value_update', 're_formatting'],
+    'entity': ['refinement', 'unrefinement', 'property_value_update'] 
 }
-
-WD_STRING_TYPES = ['monolingualtext', 'string', 'external-id', 'url', 'commonsMedia', 'geo-shape', 'tabular-data', 'math', 'musical-notation', 'unknown-values']
+    
+WD_STRING_TYPES = ['string', 'external-id', 'url', 'commonsMedia', 'geo-shape', 'tabular-data', 'math', 'musical-notation']
 WD_ENTITY_TYPES = ['wikibase-item', 'wikibase-entityid', 'wikibase-property', 'wikibase-lexeme', 'wikibase-sense', 'wikibase-form', 'entity-schema']
-WD_BASIC_TYPES = ['globecoordinate_latitude', 'globecoordinate_longitude', 'quantity', 'time']
+WD_BASIC_TYPES = ['globecoordinate_latitude', 'globecoordinate_longitude', 'quantity', 'time', 'monolingualtext', 'unknown-values']
 
 ENTITY_SIMPLE_FEATURES_TYPES = {
     'token_overlap': 'FLOAT',
     'old_in_new': 'INT',
     'new_in_old': 'INT',
-    'complete_replacement': 'INT',
-    'word_alignment_ratio': 'FLOAT',
-    'word_insertions': 'INT',
-    'word_deletions': 'INT',
-    'word_substitutions': 'INT',
-    'has_significant_prefix': 'INT',
-    'has_significant_suffix': 'INT'
+    # 'complete_replacement': 'INT',
+    # 'word_alignment_ratio': 'FLOAT',
+    # 'word_insertions': 'INT',
+    # 'word_deletions': 'INT',
+    # 'word_substitutions': 'INT',
+    # 'has_significant_prefix': 'INT',
+    # 'has_significant_suffix': 'INT'
 }
 
 ENTITY_EMBEDDING_FEATURE_COLS = {
@@ -82,9 +82,10 @@ BASE_KEY_TYPES = {
 TEXT_SIMPLE_FEATURE_COLS = [
     
     'token_overlap',
+    # 'complete_replacement',
+
     'old_in_new',
     'new_in_old',
-    'complete_replacement',
     'word_alignment_ratio',
     'word_insertions',
     'word_deletions',

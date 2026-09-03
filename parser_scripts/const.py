@@ -142,6 +142,12 @@ DATATYPE_METADATA_CHANGE_PK = ['revision_id', 'property_id', 'value_id', 'change
 # FEATURE COLUMNS
 # ------------------------------------------------------------------------------------------------------------------------------
 
+BASE_KEY_TYPES = {
+    'revision_id': 'BIGINT',
+    'property_id': 'INT',
+    'value_id': 'TEXT'
+}
+
 ENTITY_UPDATES_PK = [
     'revision_id',
     'property_id',

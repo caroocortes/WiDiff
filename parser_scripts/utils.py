@@ -102,16 +102,16 @@ def insert_rows_copy(conn, table_name, rows, columns, conflict_column=None):
                 conflict_cols = conflict_column
             
             
-            if 'entity_stat' not in table_name and 'feature' not in table_name:
+            if 'entity_stat' not in table_name:
                 # DO NOTHING on conflict
-                # if it's not an entity_stats or feature table, then I don't need to update existing rows
+                # if it's not an entity_stats, then I don't need to update existing rows
                 insert_query = f"""
                     INSERT INTO {table_name} ({column_names})
                     SELECT {column_names} FROM {temp_table}
                     ON CONFLICT ({conflict_cols}) DO NOTHING
                 """
             else:
-            # if it's an entity_stats or feature table, then I need to update existing rows, because I want to update the counts
+            # if it's an entity_stats then I need to update existing rows, because I want to update the counts
             # update only the non-conflict columns (no key columns)
                 insert_query = f"""
                     INSERT INTO {table_name} ({column_names})
@@ -123,6 +123,7 @@ def insert_rows_copy(conn, table_name, rows, columns, conflict_column=None):
             insert_query = f"""
                 INSERT INTO {table_name} ({column_names})
                 SELECT {column_names} FROM {temp_table}
+                ON CONFLICT ({conflict_cols}) DO NOTHING
             """
         
         cursor.execute(insert_query)

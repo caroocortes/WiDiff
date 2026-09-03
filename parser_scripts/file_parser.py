@@ -69,7 +69,7 @@ class FileParser():
         self.total_revisions = 0
         self.num_entities = 0  
 
-        self.num_workers = self.set_up.get('pages_in_parallel', 2) # processes that process pages in parallel
+        self.num_workers = self.set_up.get('change_extraction_processing', {}).get('pages_in_parallel', 2) # processes that process pages in parallel
 
         if self.set_up.get('change_extraction_processing', {}).get('memory_consumption_monitoring', False):
             self.peak_memory_mb = 0.0

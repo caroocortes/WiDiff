@@ -822,26 +822,29 @@ class PageParser():
             self._value_hash_cache[cache_key] = result
             return result
 
-        cache_key = (hom_prop_val['datavalue']['type'], PageParser._freeze(hom_prop_val['datavalue']['value']))
+        datavalue = hom_prop_val['datavalue']
+        value, datatype, _ = PageParser.parse_datavalue_json(datavalue.get('value'), datavalue.get('type'))
+
+        cache_key = (datatype, PageParser._freeze(value))
         cached = self._value_hash_cache.get(cache_key)
         if cached is not None:
             return cached
 
         result = hashlib.sha1(
-            json.dumps(hom_prop_val['datavalue'], separators=(',', ':')).encode('utf-8')
+            json.dumps({"type": datatype, "value": value}, separators=(',', ':')).encode('utf-8')
         ).hexdigest()
         self._value_hash_cache[cache_key] = result
         return result
     
     @staticmethod
     def _snak_signature(prop_val):
-        """ Signature to avoid dict of hashes for qual/ref changes"""
         snaktype = prop_val.get('snaktype')
         if snaktype in (NO_VALUE, SOME_VALUE):
-            return (snaktype,prop_val.get('property'))
+            return (snaktype, prop_val.get('property'))
         hom = PageParser.homogenize_datavalue(prop_val)
         dv = hom.get('datavalue')
-        return (snaktype, dv.get('type'), PageParser._freeze(dv.get('value')))
+        value, datatype, _ = PageParser.parse_datavalue_json(dv.get('value'), dv.get('type'))
+        return (snaktype, datatype, PageParser._freeze(value))
 
     def _handle_reference_changes(self, stmt_pid, stmt_value_id, prev_stmt, curr_stmt):
         """

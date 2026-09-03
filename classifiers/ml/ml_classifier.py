@@ -1,8 +1,9 @@
 import glob
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.neighbors import KNeighborsClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.utils.class_weight import compute_sample_weight
 from xgboost import XGBClassifier
+from sklearn.multioutput import MultiOutputClassifier
 from sklearn.preprocessing import MultiLabelBinarizer, StandardScaler, LabelBinarizer
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
@@ -107,43 +108,37 @@ class MLClassifier():
 
         return df_gs, df_remaining
 
-    def perform_grid_search(self, classifier, datatype, X_scaled, y_binary, cv):
+    def perform_grid_search(self, classifier, datatype, X_scaled, y_binary, cv, sample_weight=None):
         print(f'Performing grid search for {classifier} on datatype {datatype}', flush=True)
-        """
-            Model Config structure:
-            {
-                "Random_Forest": {
-                    "string": {
-                        "n_estimators": int,
-                        "max_depth": int,
-                        ...
-                    },
-                    "entity": {...},
-                    ...
-                },
-                "KN": {...} // the same structure as RF
-                "Gradient_Boosting": {...} // the same structure as RF
-            }
-        """
         
         if classifier == 'Random_Forest':
             param_grid = {
                 'n_estimators': [50, 100, 150, 200],
-                'max_depth': [None, 10, 20, 40, 80],
+                'max_depth': [None, 20, 40],
                 'min_samples_leaf': [1, 2, 4, 8],
                 'max_features': ['sqrt', 'log2', None],
-                'bootstrap': [True, False]
+                'bootstrap': [True],
+                'class_weight': ['balanced']
             }
             
-            # This already does cross-validation internally (fold=5)
-            grid_search = GridSearchCV(RandomForestClassifier(self.random_state), param_grid=param_grid, cv=cv)
+            # This already does cross-validation internally
+            grid_search = GridSearchCV(RandomForestClassifier(self.random_state), param_grid=param_grid, cv=cv, verbose=3, n_jobs=-1)
 
-        elif classifier == 'KN':
+        elif classifier == 'Gradient_Boosting':
             param_grid = {
-                'n_neighbors': [3, 5, 7, 10, 15, 20, 25, 30],
-                'weights': ['uniform', 'distance']
+                'n_estimators': [50, 100, 200],
+                'max_depth': [3, 5, 7],
+                'learning_rate': [0.01, 0.05, 0.1, 0.2],
+                'subsample': [0.6, 0.8, 1.0],
             }
-            grid_search = GridSearchCV(KNeighborsClassifier(), param_grid=param_grid, cv=cv)
+
+            base_estimator = GradientBoostingClassifier(random_state=self.random_state)
+            if datatype == 'text':
+                base_estimator = MultiOutputClassifier(base_estimator)
+                for key in list(param_grid.keys()):
+                    param_grid[f'estimator__{key}'] = param_grid.pop(key)
+                    print(f"Updated param_grid for multi-output: {param_grid}", flush=True)
+            grid_search = GridSearchCV(base_estimator, param_grid=param_grid, cv=cv, verbose=3, n_jobs=-1)
 
         elif classifier == 'XGBoost': # does not require meta model for multi-label
             # https://www.kaggle.com/code/prashant111/a-guide-on-xgboost-hyperparameters-tuning
@@ -152,13 +147,18 @@ class MLClassifier():
                 'max_depth': [3, 5, 7, 10],
                 'learning_rate': [0.01, 0.05, 0.1, 0.2],
                 'subsample': [0.6, 0.8, 1.0],
-                'colsample_bytree': [0.6, 0.8, 1.0],
-                'scale_pos_weight': [1, 2, 5, 10]  # for unbalanced classes
+                'colsample_bytree': [0.6, 0.8, 1.0]
             }
 
-            grid_search = GridSearchCV(XGBClassifier(random_state=self.random_state), param_grid=param_grid, cv=cv)
+            grid_search = GridSearchCV(XGBClassifier(random_state=self.random_state), param_grid=param_grid, cv=cv, verbose=3, n_jobs=-1)
 
-        grid_search.fit(X_scaled, y_binary)
+        fit_kwargs = {}
+        if sample_weight is not None:
+            fit_kwargs['sample_weight'] = sample_weight
+
+        y_for_fit = y_binary.argmax(axis=1) if datatype != 'text' else y_binary
+
+        grid_search.fit(X_scaled, y_for_fit, **fit_kwargs)
         best_params = grid_search.best_params_
 
         # remove the prefix estimator__ from the result
@@ -169,7 +169,7 @@ class MLClassifier():
 
         return best_params
 
-    def get_model_instance(self, classifier, best_params):
+    def get_model_instance(self, classifier, best_params, datatype=None):
         """
             Returns model instance for the specified classifier.
             Grid search is performed to find the best parameters
@@ -178,15 +178,25 @@ class MLClassifier():
         if classifier == 'Random_Forest': # already supports multi-label
             
             model = RandomForestClassifier(
-                n_estimators=best_params['n_estimators'], 
+                n_estimators=best_params['n_estimators'],
                 max_depth=best_params['max_depth'],
+                min_samples_leaf=best_params['min_samples_leaf'],
+                max_features=best_params['max_features'],
+                bootstrap=best_params['bootstrap'],
                 class_weight='balanced', # this handles unbalanced classes
                 random_state=self.random_state
             )
 
-        elif classifier == 'KN': # already supports multi-label
+        elif classifier == 'Gradient_Boosting':
+            base = GradientBoostingClassifier(
+                n_estimators=best_params['n_estimators'],
+                max_depth=best_params['max_depth'],
+                learning_rate=best_params['learning_rate'],
+                subsample=best_params['subsample'],
+                random_state=self.random_state
+            )
 
-            model = KNeighborsClassifier(n_neighbors=best_params['n_neighbors'])
+            model = MultiOutputClassifier(base) if datatype == 'text' else base
 
         elif classifier == 'XGBoost': 
             
@@ -194,12 +204,15 @@ class MLClassifier():
             model = XGBClassifier(
                 n_estimators=best_params['n_estimators'], 
                 max_depth=best_params['max_depth'],
+                learning_rate=best_params['learning_rate'],
+                subsample=best_params['subsample'],
+                colsample_bytree=best_params['colsample_bytree'],
                 random_state=self.random_state 
             )
         
         return model, None
 
-    def perform_kfold_training(self, X, y_binary, datatype, label_binarizer, feature_cols, df_index, classifier):
+    def perform_kfold_training(self, df, X, y_binary, datatype, label_binarizer, feature_cols, df_index, classifier):
         print(f'Performing k-fold training for {datatype}, {classifier}', flush=True)
         
         if datatype == 'text':
@@ -221,16 +234,6 @@ class MLClassifier():
         for fold, (train_index, test_index) in enumerate(split, 1):
             print('FOLD: ', fold, flush=True)
 
-            # TODO: remove, only for test
-            # train_labels = label_binarizer.inverse_transform(y_binary[train_index])
-            # test_labels = label_binarizer.inverse_transform(y_binary[test_index])
-
-            # print('Train label distribution:')
-            # print(pd.Series(train_labels).value_counts())
-
-            # print('Test label distribution:')
-            # print(pd.Series(test_labels).value_counts())
-
             X_train, X_test = X.iloc[train_index], X.iloc[test_index]
             y_train, y_test = y_binary[train_index], y_binary[test_index]
 
@@ -239,21 +242,36 @@ class MLClassifier():
 
             # Inner CV to find best hyperparameters for the model
             # this is ran only on the training, so the test is not seen
-            gs_cv = MultilabelStratifiedKFold(n_splits=3, shuffle=True, random_state=self.random_state)
+            sample_weight_train = None
+            if datatype != 'text':
+                y_train_1d = y_train.argmax(axis=1)
+                sample_weight_train = compute_sample_weight('balanced', y_train_1d)
+                gs_cv_obj = StratifiedKFold(n_splits=3, shuffle=True, random_state=self.random_state)
+                gs_cv = list(gs_cv_obj.split(X_train_scaled, y_train_1d))   # materialize with 1D labels
+            else:
+                gs_cv_obj = MultilabelStratifiedKFold(n_splits=3, shuffle=True, random_state=self.random_state)
+                gs_cv = list(gs_cv_obj.split(X_train_scaled, y_train))       # materialize with one-hot y
 
             best_params = self.perform_grid_search(
                 classifier, datatype,
-                X_train_scaled, y_train,           
-                gs_cv                  
+                X_train_scaled, y_train,
+                gs_cv,   
+                sample_weight=sample_weight_train
             )
 
-            model, _ = self.get_model_instance(classifier, best_params)
+            model, _ = self.get_model_instance(classifier, best_params, datatype=datatype)
 
             metrics_results = {}
 
             actual_test_index = df_index[test_index]
 
-            clf = model.fit(X_train_scaled, y_train) # fit model on trainting data
+            fit_kwargs = {}
+            if sample_weight_train is not None:
+                fit_kwargs['sample_weight'] = sample_weight_train
+
+            y_train_for_fit = y_train_1d if datatype != 'text' else y_train
+
+            clf = model.fit(X_train_scaled, y_train_for_fit, **fit_kwargs)
 
             y_pred = np.zeros((len(X_test), len(label_binarizer.classes_)))
             X_test_scaled = scaler.transform(X_test)
@@ -261,32 +279,52 @@ class MLClassifier():
             # predict_proba from docs: ndarray of shape (n_samples, n_classes), or a list of such arrays
             # The class probabilities of the input samples. The order of the classes corresponds to that in the attribute classes_.
             
-            if isinstance(y_pred_proba, list):
-                # the sklearn classifiers return a list of arrays, one per label
-                # each array has shape (n_samples, 2), where the second column is the positive class probability
+            if datatype == 'text':
+                if isinstance(y_pred_proba, list):
+                    # the sklearn classifiers return a list of arrays, one per label
+                    # each array has shape (n_samples, 2), where the second column is the positive class probability
 
-                for label_idx in range(len(label_binarizer.classes_)):
-                    probs = y_pred_proba[label_idx][:, 1] # positive class prob for label
-                    y_pred[:, label_idx] = (probs >= self.prob_threshold).astype(int)
+                    for label_idx in range(len(label_binarizer.classes_)):
+                        probs = y_pred_proba[label_idx][:, 1] # positive class prob for label
+                        y_pred[:, label_idx] = (probs >= self.prob_threshold).astype(int)
 
-                # cases where none of the probs reaches 0.5
-                no_prediction_mask = y_pred.sum(axis=1) == 0
-                if no_prediction_mask.any():
-                    # get all probabilities as array (n_samples, n_classes)
-                    all_probs = np.column_stack([y_pred_proba[j][:, 1] for j in range(len(label_binarizer.classes_))]) # get positive class porb
-                    # for samples with no prediction, set highest prob class to 1
-                    max_indices = np.argmax(all_probs[no_prediction_mask], axis=1)
-                    y_pred[no_prediction_mask, max_indices] = 1
+                    # cases where none of the probs reaches 0.5
+                    no_prediction_mask = y_pred.sum(axis=1) == 0
+                    if no_prediction_mask.any():
+                        # get all probabilities as array (n_samples, n_classes)
+                        all_probs = np.column_stack([y_pred_proba[j][:, 1] for j in range(len(label_binarizer.classes_))]) # get positive class porb
+                        # for samples with no prediction, set highest prob class to 1
+                        max_indices = np.argmax(all_probs[no_prediction_mask], axis=1)
+                        y_pred[no_prediction_mask, max_indices] = 1
+                else:
+                    # XGboost returns an ndarray with shape (n_samples, n_classes)
+                    # so it gives you for every sample the probabilities for each class
+                    y_pred = (y_pred_proba >= self.prob_threshold).astype(int)    
+
+                    no_prediction_mask = y_pred.sum(axis=1) == 0
+                    if no_prediction_mask.any():
+                        max_indices = np.argmax(y_pred_proba[no_prediction_mask], axis=1)
+                        y_pred[no_prediction_mask, max_indices] = 1
+            else: 
+                # entity is not multi-label, so we can just take the class with the highest probability
+                if isinstance(y_pred_proba, list):
+                    all_probs = np.column_stack([p[:, 1] for p in y_pred_proba])
+                else:
+                    all_probs = y_pred_proba
+                max_indices = np.argmax(all_probs, axis=1)
+                y_pred[np.arange(len(y_pred)), max_indices] = 1
+
+            if datatype == 'entity':
+                debug_rows = df.loc[actual_test_index, ['old_value_label', 'new_value_label']].copy()
             else:
-                # XGboost returns an ndarray with shape (n_samples, n_classes)
-                # so it gives you for every sample the probabilities for each class
-                y_pred = (y_pred_proba >= self.prob_threshold).astype(int)    
+                debug_rows = df.loc[actual_test_index, ['old_value', 'new_value']].copy()
+                
+            debug_rows['true_labels'] = list(label_binarizer.inverse_transform(y_test))
+            debug_rows['pred_labels'] = list(label_binarizer.inverse_transform(y_pred))
 
-                no_prediction_mask = y_pred.sum(axis=1) == 0
-                if no_prediction_mask.any():
-                    max_indices = np.argmax(y_pred_proba[no_prediction_mask], axis=1)
-                    y_pred[no_prediction_mask, max_indices] = 1
-    
+            print(f"\n--- Fold {fold} sample predictions ({datatype}) ---", flush=True)
+            print(debug_rows.head(5).to_string(), flush=True)
+
             for i, class_label in enumerate(label_binarizer.classes_):
                 #NOTE: this selects all rows for label i
                 if not class_label in metrics_results:
@@ -355,10 +393,10 @@ class MLClassifier():
     def train_classifier(self):
         os.makedirs(FEATURES_DIR, exist_ok=True)
         
-        datatypes = ['text', 'entity'] 
+        datatypes = ['entity', 'text'] 
 
         classifiers_rf = dict()
-        classifiers_kn = dict()
+        classifiers_gb = dict()
         classifiers_xgb = dict()
         
         for datatype in datatypes:
@@ -410,18 +448,18 @@ class MLClassifier():
                 label_binarizer = LabelBinarizer()
                 y_binary = label_binarizer.fit_transform(df['label'])
 
-            results_folds_rf, micro_averages_rf = self.perform_kfold_training(X, y_binary, datatype, label_binarizer, feature_cols, df.index.values, classifier='Random_Forest')
-            results_folds_kn, micro_averages_kn = self.perform_kfold_training(X, y_binary, datatype, label_binarizer, feature_cols, df.index.values, classifier='KN')
-            results_folds_xg, micro_averages_xg = self.perform_kfold_training(X, y_binary, datatype, label_binarizer, feature_cols, df.index.values, classifier='XGBoost')
+            results_folds_rf, micro_averages_rf = self.perform_kfold_training(df, X, y_binary, datatype, label_binarizer, feature_cols, df.index.values, classifier='Random_Forest')
+            results_folds_gb, micro_averages_gb = self.perform_kfold_training(df, X, y_binary, datatype, label_binarizer, feature_cols, df.index.values, classifier='Gradient_Boosting')
+            results_folds_xg, micro_averages_xg = self.perform_kfold_training(df, X, y_binary, datatype, label_binarizer, feature_cols, df.index.values, classifier='XGBoost')
 
             classifiers_rf[datatype] = {
                 'results_folds': results_folds_rf,
                 'micro_averages': micro_averages_rf
             }
 
-            classifiers_kn[datatype] = {
-                'results_folds': results_folds_kn,
-                'micro_averages': micro_averages_kn
+            classifiers_gb[datatype] = {
+                'results_folds': results_folds_gb,
+                'micro_averages': micro_averages_gb
             }
 
             classifiers_xgb[datatype] = {
@@ -431,7 +469,7 @@ class MLClassifier():
 
         models_to_save = {
             'random_forest': classifiers_rf,
-            'kn': classifiers_kn,
+            'gradient_boosting': classifiers_gb,
             'xgboost': classifiers_xgb
         }
 
@@ -521,15 +559,20 @@ class MLClassifier():
         # Average across folds: shape (n_samples, n_classes)
         avg_prediction = np.mean(all_predictions, axis=0)
 
-        # Apply probability threshold for each instance
-        final_labels = (avg_prediction >= self.prob_threshold).astype(int)
-
         label_binarizer = results_folds[0]['label_binarizer'] # it's the same for all folds
-        
-        for i in range(len(final_labels)):
-            if not final_labels[i].any():                    # no label -> fallback to argmax
-                final_labels[i, np.argmax(avg_prediction[i])] = 1
-                continue
+
+        if dt_label == 'text':
+            # Apply probability threshold for each instance
+            final_labels = (avg_prediction >= self.prob_threshold).astype(int)
+            
+            for i in range(len(final_labels)):
+                if not final_labels[i].any():                    # no label -> fallback to argmax
+                    final_labels[i, np.argmax(avg_prediction[i])] = 1
+                    continue
+        else:
+            final_labels = np.zeros_like(avg_prediction, dtype=int)
+            max_indices = np.argmax(avg_prediction, axis=1)
+            final_labels[np.arange(len(final_labels)), max_indices] = 1
 
         # get actual label names
         final_labels_transformed = label_binarizer.inverse_transform(final_labels)
@@ -580,12 +623,23 @@ class MLClassifier():
             cursor = conn.cursor()
 
             key_cols_temp = ', '.join([f'{col} {col_type}' for col, col_type in BASE_KEY_TYPES.items()])
+            
+            gs_column = ''
+            if dt_label == 'text':
+                # entity already had rb classification, so we don't need to add label and gs columns for it
+                cursor.execute(f"ALTER TABLE updates_{table_name}{table_suffix} DROP COLUMN IF EXISTS {label_column}, ADD COLUMN IF NOT EXISTS {label_column} TEXT")
+                cursor.execute(f"ALTER TABLE updates_{table_name}{table_suffix} DROP COLUMN IF EXISTS gs, ADD COLUMN IF NOT EXISTS gs BOOLEAN DEFAULT FALSE")
+                gs_column = ', gs BOOLEAN'
 
-            cursor.execute(f"ALTER TABLE updates_{table_name}{table_suffix} DROP COLUMN IF EXISTS {label_column}, ADD COLUMN IF NOT EXISTS {label_column} TEXT")
+            cursor.execute(f"CREATE TEMP TABLE temp_predictions_{dt_label} ({key_cols_temp}, predicted_labels TEXT {gs_column})")
             conn.commit()
-            cursor.execute(f"CREATE TEMP TABLE temp_predictions_{dt_label} ({key_cols_temp}, predicted_labels TEXT)")
 
             num_batches = 0
+
+            filt_rb = ''
+            if dt_label == 'entity':
+                # entity already had rb classification
+                filt_rb += 'AND rb = FALSE'
 
             # load best model
             with open(f'{TRAINING_INFO_DIR}/best_model_training_info.pkl', 'rb') as f:
@@ -597,8 +651,8 @@ class MLClassifier():
                 query = f"""
                     SELECT {key_cols_str}, {value_cols_str}
                     FROM updates_{table_name}{table_suffix}
-                    WHERE
-                    (label = '' OR label IS NULL)
+                    WHERE 
+                    (label = '' OR label IS NULL) AND (gs IS NULL OR gs = FALSE) {filt_rb}
                     LIMIT {batch_size}
                 """
 
@@ -612,6 +666,7 @@ class MLClassifier():
                     break
 
                 if gs_lookup is not None:
+                    df['gs'] = False
                     df_gs, df_remaining = self._split_by_gs(df, gs_lookup)
                     if len(df_gs) > 0:
                         print(f'Found {len(df_gs)} rows in gold standard, label already set', flush=True)
@@ -624,6 +679,7 @@ class MLClassifier():
                     results_parts.append(
                         df_gs[key_cols].assign(predicted_labels=df_gs['_gs_label'].values)
                     )
+                    df_gs['gs'] = True
 
                 if len(df_remaining) > 0:
                     print(f'Found {len(df_remaining)} rows not in gold standard, computing features', flush=True)
@@ -657,10 +713,15 @@ class MLClassifier():
 
                 start_time = time.time()
                 # Update labels
+                filt_upt_gs = ''
+                if dt_label == 'text':
+                    # entity already had rb classification which already checks for rows in gold_standard so gs was already set
+                    #  therefore we only update gs for text rows
+                    filt_upt_gs = 'gs = tp.gs'
                 cursor.execute(f"""
                     UPDATE updates_{table_name}{table_suffix} f
-                    SET {label_column} = tp.predicted_labels
-                    FROM temp_predictions_{dt_label} tp 
+                    SET {label_column} = tp.predicted_labels, {filt_upt_gs}
+                    FROM temp_predictions_{dt_label} tp
                     WHERE 
                         {' AND '.join([f'f.{key_col} = tp.{key_col}' for key_col in key_cols])}
                 """)

@@ -6,11 +6,10 @@ from datetime import datetime
 import time
 import io
 import csv
-from pathlib import Path
-import yaml
 import pandas as pd
+import numpy as np
 
-from parser_scripts.const import STOP_WORDS, SETUP_PATH, BASE_KEY_TYPES
+from parser_scripts.const import STOP_WORDS, BASE_KEY_TYPES
 from parser_scripts.utils import strip_accents, query_to_df
 from classifiers.rule.transitive_closure_cache import TransitiveClosureCache
 
@@ -157,9 +156,7 @@ class RuleBasedClassifier():
             (label, branch) pair. If every match agrees on the label, join
             their branch_ids under that one label. If matches disagree (a
             genuinely mixed edit - e.g. year added [refinement] and day
-            removed [unrefinement] in the same revision), report BOTH labels
-            and BOTH branch sets rather than letting one silently overwrite
-            the other."""
+            removed [unrefinement] in the same revision), it's prop value update, branches remain."""
             if not matches:
                 return '', ''
             distinct_labels = sorted(set(m[0] for m in matches))
@@ -654,7 +651,7 @@ class RuleBasedClassifier():
 
                         elif revert_flags[future_key][1] == 0 and revert_flags[future_key][0] == 1: # reversion = 0 and is_Reverted = 1
                             
-                            revert_flags[future_key][1] = (1, 1, revert_flags[future_key][2], revert_flags[future_key][3])
+                            revert_flags[future_key] = (1, 1, revert_flags[future_key][2], revert_flags[future_key][3])
                             
                             if future_change['change_target'] == '' and future_change['action'] in ['DELETE', 'CREATE']:
                                 
@@ -927,10 +924,17 @@ class RuleBasedClassifier():
         cursor = self.conn.cursor()
 
         key_cols_temp = ', '.join([f'{col} {col_type}' for col, col_type in BASE_KEY_TYPES.items()])
-        cursor.execute(f"ALTER TABLE updates_{datatype}{table_suffix} DROP COLUMN IF EXISTS label, ADD COLUMN IF NOT EXISTS label TEXT DEFAULT NULL;")
-        cursor.execute(f"ALTER TABLE updates_{datatype}{table_suffix} DROP COLUMN IF EXISTS processed, ADD COLUMN IF NOT EXISTS processed BOOLEAN DEFAULT FALSE;")
-        self.conn.commit()
-        cursor.execute(f"CREATE TEMP TABLE temp_results_{datatype}{table_suffix} ({key_cols_temp}, label TEXT)")
+        try:
+            cursor.execute(f"ALTER TABLE updates_{datatype}{table_suffix} DROP COLUMN IF EXISTS label, ADD COLUMN IF NOT EXISTS label TEXT DEFAULT NULL;")
+            cursor.execute(f"ALTER TABLE updates_{datatype}{table_suffix} DROP COLUMN IF EXISTS rb, ADD COLUMN IF NOT EXISTS rb BOOLEAN DEFAULT FALSE;")
+            cursor.execute(f"ALTER TABLE updates_{datatype}{table_suffix} DROP COLUMN IF EXISTS gs, ADD COLUMN IF NOT EXISTS gs BOOLEAN DEFAULT FALSE;")
+            cursor.execute(f"ALTER TABLE updates_{datatype}{table_suffix} DROP COLUMN IF EXISTS processed, ADD COLUMN IF NOT EXISTS processed BOOLEAN DEFAULT FALSE;")
+            self.conn.commit()
+        except Exception as e:
+            print(f"Error altering table updates_{datatype}{table_suffix}: {e}", flush=True)
+            self.conn.rollback()
+            return
+        cursor.execute(f"CREATE TEMP TABLE temp_results_{datatype}{table_suffix} ({key_cols_temp}, label TEXT, gs BOOLEAN DEFAULT FALSE, rb BOOLEAN DEFAULT FALSE);")
         self.conn.commit()
 
         start_time = time.perf_counter()
@@ -949,9 +953,14 @@ class RuleBasedClassifier():
                 table_suffix=table_suffix,
                 batch_size=batch_size
             )
+            print(query, flush=True)
             df = query_to_df(self.conn, query)
+
+            df['rb'] = False
+            df['gs'] = False
             
             if len(df) == 0:
+                print('No more unprocessed rows found, exiting loop', flush=True)
                 break
 
             df_gs, df_remaining = self._split_by_gs(df, gs_lookup)
@@ -959,6 +968,7 @@ class RuleBasedClassifier():
             if len(df_gs) > 0:
                 print(f'Found {len(df_gs)} rows in gold standard, label already set', flush=True)
                 df_gs['label'] = df_gs['_gs_label']
+                df_gs['gs'] = True
 
             if len(df_remaining) > 0:
                 print(f'Found {len(df_remaining)} rows not in gold standard, doing Rule-Based Classification', flush=True)
@@ -968,9 +978,11 @@ class RuleBasedClassifier():
                     axis=1,
                     result_type='expand'
                 )
+
+                df_remaining['rb'] = np.where(df_remaining['label'] != '', True, False)
             
-            result_gs = df_gs[[*key_cols, 'label']] if len(df_gs) > 0 else pd.DataFrame(columns=[*key_cols, 'label'])
-            result_remaining = df_remaining[[*key_cols, 'label']] if len(df_remaining) > 0 else pd.DataFrame(columns=[*key_cols, 'label'])
+            result_gs = df_gs[[*key_cols, 'label', 'gs', 'rb']] if len(df_gs) > 0 else pd.DataFrame(columns=[*key_cols, 'label'])
+            result_remaining = df_remaining[[*key_cols, 'label', 'gs', 'rb']] if len(df_remaining) > 0 else pd.DataFrame(columns=[*key_cols, 'label'])
 
             result = pd.concat([result_gs, result_remaining], ignore_index=True)
 
@@ -986,7 +998,7 @@ class RuleBasedClassifier():
 
             cursor.execute(f"""
                 UPDATE updates_{datatype}{table_suffix} f
-                SET label = tp.label, processed = TRUE
+                SET label = tp.label, processed = TRUE, gs = tp.gs, rb = tp.rb
                 FROM temp_results_{datatype}{table_suffix} tp
                 WHERE 
                     {' AND '.join([f'f.{col} = tp.{col}' for col in key_cols])}
