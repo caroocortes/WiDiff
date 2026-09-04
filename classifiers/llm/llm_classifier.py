@@ -211,8 +211,7 @@ class LLMClassifier():
     def _run_batch_classification(self, df, datatype, output_col, batch_size=5, examples_text=''):
         """Chunks df into batches, calls classify_batch per chunk, and
         falls back to a single classify() call for any row the batch
-        response didn't cover - so a parsing hiccup on one row never
-        loses coverage on the rest of the batch."""
+        response didn't cover."""
 
         examples_text = self.generate_examples_text(datatype)
         batch_context = self.build_context(datatype, examples_text, batch=True)
@@ -230,7 +229,6 @@ class LLMClassifier():
                     label = self.classify(df.loc[idx], single_context, datatype)
                 df.at[idx, output_col] = label
         end_time = time.time()
-        print(f"Time taken for LLM classification of {datatype} changes: {end_time - start_time} seconds")
         with open(f'{LLM_RESULTS_DIR}/llm_classification_time.txt', 'w') as f:
             f.write(f"Time taken for LLM classification of {datatype} changes: {end_time - start_time} seconds\n")
         return df
@@ -264,7 +262,7 @@ class LLMClassifier():
                     recall = recall_score(y_true, y_pred, zero_division=0)
                     f1 = f1_score(y_true, y_pred, zero_division=0)
 
-                    results['llm'][datatype][label] = {
+                    results[datatype][label] = {
                         'precision': precision,
                         'recall': recall,
                         'accuracy': accuracy,

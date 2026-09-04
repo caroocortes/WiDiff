@@ -46,7 +46,7 @@ class RuleBasedClassifier():
             special_old = sum(1 for c in old_no_accent if not (c.isalnum() or c.isspace()))
             special_new = sum(1 for c in new_no_accent if not (c.isalnum() or c.isspace()))
             if special_old != special_new:
-                active.add('re_formatting')
+                active.add('textual_change')
 
             # remove special characters (non alphanumeric and non whitespace) for whitespace comparison
             old_stripped = ''.join(c for c in old_no_accent if c.isalnum() or c.isspace())
@@ -54,13 +54,13 @@ class RuleBasedClassifier():
 
             # counts whitespace
             if len(re.findall(r'\s', old_stripped)) != len(re.findall(r'\s', new_stripped)):
-                active.add('re_formatting')
+                active.add('textual_change')
 
             # remove whitespace
             old_nospace = re.sub(r'\s', '', old_stripped)
             new_nospace = re.sub(r'\s', '', new_stripped)
             if old_nospace.lower() == new_nospace.lower() and old_nospace != new_nospace:
-                active.add('re_formatting')
+                active.add('textual_change')
             if old_nospace.lower() == new_nospace.lower():
                 return active if active else None
             

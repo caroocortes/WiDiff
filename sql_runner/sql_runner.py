@@ -5,11 +5,16 @@ import json
 class SQLRunner:
     def __init__(self, db_config_path):
 
-        with open(db_config_path, 'r') as f:
-            db_config = json.load(f)
+        if not db_config_path:
+            raise ValueError("Database configuration path is not provided.")
 
-        # dbname = db_config.get("DB_NAME")
-        dbname = 'wikidata_changes_new'
+        try:
+            with open(db_config_path, 'r') as f:
+                db_config = json.load(f)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Database configuration file not found at {db_config_path}.")
+
+        dbname = db_config.get("DB_NAME")
         password = db_config.get("DB_PASS")
         user = db_config.get("DB_USER")
         host = db_config.get("DB_HOST")

@@ -10,6 +10,7 @@ logs/*
 !logs/experiment_results.csv
 !logs/parser_log_files.csv
 !logs/metrics.ipynb
+classifiers/ml/training_dataset/gs_entity_old.csv
 logs_new/*
 logs/*
 slurm_wrapper.slurm

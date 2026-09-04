@@ -295,47 +295,38 @@ class FeatureCreation():
         else:
             complete_replacement = 0
 
-        # word-level sequence alignment. This aligns words by
-        # position
-        word_matcher = difflib.SequenceMatcher(None, old_value.split(), new_value.split())
-        word_alignment_ratio = word_matcher.ratio()
-        word_inserts = word_deletes = word_replaces = 0
-        for tag, i1, i2, j1, j2 in word_matcher.get_opcodes():
-            if tag == 'insert':
-                word_inserts += (j2 - j1)
-            elif tag == 'delete':
-                word_deletes += (i2 - i1)
-            elif tag == 'replace':
-                word_replaces += max(i2 - i1, j2 - j1)
-        
-        word_insertions = word_inserts
-        word_deletions = word_deletes
-        word_substitutions = word_replaces
-
-        has_significant_prefix = int(len(os.path.commonprefix([old_value, new_value])) >= 3)
-        has_significant_suffix = int(len(os.path.commonprefix([old_value[::-1], new_value[::-1]])) >= 3)
-
         result = (
             token_overlap,
             old_in_new,
-            new_in_old,
-            complete_replacement,
-
-            word_alignment_ratio,
-            word_insertions,
-            word_deletions,
-            word_substitutions,
-
-            has_significant_prefix,
-            has_significant_suffix,
+            new_in_old
         )
 
         if datatype == 'text':  # remove for entity
 
+            # word-level sequence alignment. This aligns words by
+            # position
+            word_matcher = difflib.SequenceMatcher(None, old_value.split(), new_value.split())
+            word_alignment_ratio = word_matcher.ratio()
+            word_inserts = word_deletes = word_replaces = 0
+            for tag, i1, i2, j1, j2 in word_matcher.get_opcodes():
+                if tag == 'insert':
+                    word_inserts += (j2 - j1)
+                elif tag == 'delete':
+                    word_deletes += (i2 - i1)
+                elif tag == 'replace':
+                    word_replaces += max(i2 - i1, j2 - j1)
+            
+            word_insertions = word_inserts
+            word_deletions = word_deletes
+            word_substitutions = word_replaces
+
+            has_significant_prefix = int(len(os.path.commonprefix([old_value, new_value])) >= 3)
+            has_significant_suffix = int(len(os.path.commonprefix([old_value[::-1], new_value[::-1]])) >= 3)
+
             word_count_old = int(len(old_value.split()))
             word_count_new = int(len(new_value.split()))
 
-            special_char_regex = r'[^a-zA-Z0-9]'
+            special_char_regex = r'[^a-zA-Z0-9\s]' # exclude white spaces
 
             special_char_count_old = len(re.findall(special_char_regex, old_value))
             special_char_count_new = len(re.findall(special_char_regex, new_value))
@@ -365,19 +356,30 @@ class FeatureCreation():
                     # character itself 
                     return lc if len(lc) == 1 else c
 
-                old_keys = [_safe_lower_char(c) for c in old_value]
-                new_keys = [_safe_lower_char(c) for c in new_value]
-                matcher = difflib.SequenceMatcher(None, old_keys, new_keys)
+                old_words = old_value.split()
+                new_words = new_value.split()
+
+                # only compare case within words that are the same ignoring case,
+                # i.e. genuinely shared words - not an arbitrary character-level
+                # alignment across the whole string
+                old_words_lower = [_safe_lower_char(w) for w in old_words]
+                new_words_lower = [_safe_lower_char(w) for w in new_words]
+
+                matcher = difflib.SequenceMatcher(None, old_words_lower, new_words_lower)
                 swaps = 0
                 for tag, i1, i2, j1, j2 in matcher.get_opcodes():
                     if tag == 'equal':
                         for oi, ni in zip(range(i1, i2), range(j1, j2)):
-                            if old_value[oi] != new_value[ni]:
-                                swaps += 1
+                            old_w, new_w = old_words[oi], new_words[ni]
+                            if old_w != new_w and old_w.lower() == new_w.lower():
+                                # same word, different case somewhere in it - count char-level swaps within just this word
+                                for oc, nc in zip(old_w, new_w):
+                                    if oc != nc:
+                                        swaps += 1
                 return swaps
 
             # case diff
-            case_swap_count = _count_case_swaps(old_value, new_value)
+            case_swap_count = 0 if complete_replacement else _count_case_swaps(old_value, new_value)
 
             def get_edit_operations(old_value, new_value):
                 ops = Levenshtein.editops(old_value, new_value)
@@ -402,8 +404,8 @@ class FeatureCreation():
             old_len = len(old_value)
             new_len = len(new_value)
             max_len = max(old_len, new_len) if max(old_len, new_len) > 0 else 1
-            lev_dist = levenshtein_distance(old_value.lower().strip(), new_value.lower().strip())
-            # percentage of how much changed (RAW strings - conflates formatting + content changes)
+            lev_dist = levenshtein_distance(old_value, new_value)
+            # percentage of how much changed (RAW strings)
             raw_edit_distance_ratio = lev_dist / max_len
 
             # residual edit distance after stripping case/whitespace/special
@@ -421,6 +423,16 @@ class FeatureCreation():
             )
 
             result = result + (
+
+                word_alignment_ratio,
+
+                word_insertions,
+                word_deletions,
+                word_substitutions,
+
+                has_significant_prefix,
+                has_significant_suffix,
+
                 word_count_old,
                 word_count_new,
 
