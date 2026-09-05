@@ -1,0 +1,26 @@
+change_extraction_processing:
+  db_batch_size: 5000
+  db_max_queue_size: 10000
+  files_directory: /path/to/dump/dir
+  files_in_parallel: 4
+  language: en
+  memory_consumption_monitoring: true
+  page_queue_size: 1000
+  pages_in_parallel: 2
+database_config_path: config/db_config.json
+change_extraction_filters:
+  astronomical_objects_filter:
+    datatype_metadata_extraction: false
+    extract: true
+  less_filter:
+    datatype_metadata_extraction: false
+    extract: true
+    threshold: 10
+  rest:
+    datatype_metadata_extraction: false
+  scholarly_articles_filter:
+    datatype_metadata_extraction: false
+    extract: true
+re_interpretation: true
+reverted_edit_tagging:
+  time_threshold_seconds: 2419200
