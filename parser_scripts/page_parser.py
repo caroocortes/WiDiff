@@ -511,16 +511,9 @@ class PageParser():
         # -- P8554 = earliest end date - earliest date on which the statement could have begun to no longer be true
         # -- P12506 = latest end date - latest date beyond which the statement could no longer be true
         # -- end period (P3416)
-        
-        if self.set_up.get('re_interpretation', False) and action == 'CREATE':
-            if qual_property_id in [582, 8554, 12506, 3416]:
-                label = 'soft_deletion'
-
         if self.set_up.get('re_interpretation', False):
-            if action == 'CREATE':
-                label = 'qualifier_insertion'
-            elif action == 'DELETE':
-                label = 'qualifier_deletion'
+            if action == 'CREATE' and qual_property_id in [582, 8554, 12506, 3416]:
+                label = 'soft_deletion'
         
         change = (
             self.revision_meta['revision_id'],
