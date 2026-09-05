@@ -1,0 +1,23 @@
+classification_llm:
+  path_to_entity_changes: classifiers/ml/training_dataset/gs_entity.csv
+  path_to_text_changes: classifiers/ml/training_dataset/gs_text.csv
+classification_ml:
+  classify: false
+  evaluate: true
+  table_suffix: ''
+  train: false
+config:
+  classifier_type: ml
+  db_config_path: wikidata-edit-history/config/db_config.json
+  ml_config_path: wikidata-edit-history/classifiers/ml/config/ml_classifier_config.json
+  llm_config_path: wikidata-edit-history/classifiers/llm/config/llm_classifier_config.json
+separate_non_latin_entity: false
+separate_non_latin_text: false
+transitive_closure_cache:
+  has_part_transitive_path: auxiliary_data/transitive_closures/has_parts_transitive.csv
+  located_in_transitive_path: auxiliary_data/transitive_closures/located_in_transitive.csv
+  part_of_transitive_path: auxiliary_data/transitive_closures/part_of_transitive.csv
+  subclass_transitive_path: auxiliary_data/transitive_closures/subclass_of_transitive.csv
+  transitive_closure_pickle_file_path: auxiliary_data/transitive_closures/transitive_closure_cache.pkl
+  transitive_closure_stats_pickle_file_path: auxiliary_data/transitive_closures/transitive_closure_stats.pkl
+update_entity_labels_descriptions: false

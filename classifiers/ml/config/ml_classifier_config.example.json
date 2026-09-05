@@ -1,0 +1,5 @@
+{
+    "random_state": 42,
+    "fold_splits": 5,
+    "prob_threshold": 0.5
+}
