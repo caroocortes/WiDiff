@@ -39,3 +39,5 @@ wdtk/ExtractInstanceOfSubclassOf.java
 wdtk/ExtractLabelsProperties.java
 scalability_tests/*
 setup.yml
+
+classifiers/llm/qwen_server.sh
