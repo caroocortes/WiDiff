@@ -41,3 +41,4 @@ scalability_tests/*
 setup.yml
 
 classifiers/llm/qwen_server.sh
+config/db_config.json

@@ -269,11 +269,22 @@ The shared samples labeled by 2 other extra annotators and compute of IAA can be
 ---
 
 ## LLM baseline
-1. Configure LLM in *classifiers/llm/config/llm_classifier_config.json*. To use Qwen 3.5 (FP8 quantized), run the script *classifiers/llm/qwen_server.sh* in the background and set the corresponding `base_url` in the configuration file (*classifiers/llm/config/llm_classifier_config.json*). 
+1. Copy the example config file *classifiers/llm/config/llm_classifier_config.example.json* and configure the respective LLM. To use Qwen 3.5 (FP8 quantized), we ran:
+```
+vllm serve Qwen/Qwen3.5-35B-A3B-FP8 \
+    --port {port} \
+    --tensor-parallel-size 2 \
+    --max-model-len 8192 \
+    --reasoning-parser qwen3 \
+    --language-model-only \
+    --disable-custom-all-reduce \
+    --enforce-eager 
+```
+in the background and set the corresponding *base_url* (note the {port} in the previous command) in the configuration file (*classifiers/llm/config/llm_classifier_config.json*). 
 2. Set `classifier_type: llm` and `llm_config_path` under *config* in  *wikidata-edit-history/classifier_setup.yml*. 
 3. Run `python3 -m classifiy_remaining_changes`. This classifies changes on the labeled dataset (*classifiers/ml/training_dataset*). To modify the changes to label, set the `[classification_llm][path_to_entity_changes]` and `[classification_llm][path_to_text_changes]` in  *wikidata-edit-history/classifier_setup.yml* to other files.
 
-*Note:* We used 2 40GB VRAM GPUs and that's why `--tensor-parallel-size 2` is used in *classifiers/llm/qwen_server.sh*. If running on a single GPU, then this should be removed
+*Note:* We used 2 A100 - 40GB VRAM GPUs and that's why `--tensor-parallel-size 2`. If running on a single GPU, then this should be removed
 
 ---
 
