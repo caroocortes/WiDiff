@@ -116,7 +116,7 @@ We provide an example for the *classifier_setup.yml* in *classifier_setup.exampl
 1. Rename the table *updates_text{suffix}* to *updates_text{suffix}_full*
 2. Create the following 2 tables:
 ```
-  create table updates_text{suffix}_latin as
+  create table updates_text{suffix}_non_latin as
   select *
   from updates_text{suffix}_full
   where old_value->>0 ~ '[^\u0000-\u036F\u1E00-\u1EFF\u2000-\u206F\u2070-\u218F]' OR
@@ -130,9 +130,9 @@ We provide an example for the *classifier_setup.yml* in *classifier_setup.exampl
 ```
 3. Run the update of labels and descriptions for entity. 
 
-**NOTE:** We provide the table entity_stats_all (download *entity_stats_all.zip* from [Wikidata Change Classification ML models, features, transitive closures (October 2025), and data for plots]()). However, this table is automatically generated in the script from the entity_stats, entity_stats_as, entity_stats_ao and entity_stats_less. If you performed a new extraction with a new dump, you can just run the script. If using the provided data (from the dump of June 2025), download *entity_stats_all.zip* and upload it to the database with the name *entity_stats_all*.
+**NOTE:** We provide a dump of the table entity_stats_all (download *entity_stats_all.tar* from [Wikidata Change Classification: ML models, features, transitive closures (October 2025), and data for plots](https://doi.org/10.5281/zenodo.22205544) and restore the dump onto the database). However, this table is automatically generated in the script from the entity_stats, entity_stats_sa, entity_stats_ao and entity_stats_less tables. If you performed a **new extraction with a new dump**, you can just run the script and the update will be performed with all entities' labels and descriptions. If using the provided data (from the dump of June 2025) and the filtered dataset (no _less, _sa, or _ao partitions), download *entity_stats_all.tar* and upload it to the database with the name *entity_stats_all*.
 
-For this, run extract_remaining_changes.py with the following parameters in the classifier_setup.yml
+To run the labels and descriptions updates run `python3 -m extract_remaining_changes` with the following parameters in the *classifier_setup.yml*
 
 ```
 classification_ml:
@@ -146,10 +146,10 @@ config:
 update_entity_labels_descriptions: true    <--------
 ```
 
-4. Rename *updates_entity{suffix}* to *updates_entity{suffix}_full*
+4. Rename the table *updates_entity{suffix}* to *updates_entity{suffix}_full*
 5. Create the following 2 tables:
 ```
-  create table updates_entity{suffix}_latin as
+  create table updates_entity{suffix}_non_latin as
   select *
   from updates_entity{suffix}_full
   where (old_value_label = '' OR old_value_label IS NULL) OR
@@ -166,10 +166,10 @@ update_entity_labels_descriptions: true    <--------
             new_value_label ~ '[^\u0000-\u036F\u1E00-\u1EFF\u2000-\u206F\u2070-\u218F]');
 ```
 
-**NOTE:** The previous steps separate changes containing non-latin characters.
+**NOTE:** The previous steps separate changes containing non-latin characters into their own table (with suffix _latin).
 
-1. Download Transitive closure cache from [Wikidata Change Classification ML models, features, transitive closures (October 2025), and data for plots]() and store it in *auxiliary_data/s*. If not, create a new one following the steps in [Downloading extra data](#downloading-extra-data) and [Transitive Closure Cache Creation](#transitive-closure-cache-creation)
-2. Download the trained ML classifiers from [Wikidata Change Classification ML models, features, transitive closures (October 2025), and data for plots]() and put both *training_info* and *features* folder under *classifiers/ml/*.
+1. Download Transitive closure cache from [Wikidata Change Classification: ML models, features, transitive closures (October 2025), and data for plots](https://doi.org/10.5281/zenodo.22205544) and store it in *auxiliary_data/s*. If not, create a new one following the steps in [Downloading extra data](#downloading-extra-data) and [Transitive Closure Cache Creation](#transitive-closure-cache-creation)
+2. Download the trained ML classifiers from [Wikidata Change Classification: ML models, features, transitive closures (October 2025), and data for plots](https://doi.org/10.5281/zenodo.22205544) and put both *training_info* and *features* folder under *classifiers/ml/*.
 3. Set the following parameters in *wikidata-edit-history/classifier_setup.yml*:
 ````
   config:
@@ -197,7 +197,7 @@ this command classifies entity changes using rule-based first, and then classifi
 
 ## ML model training
 
-The trained ML models and features can be found in [Wikidata Change Classification ML models, features, transitive closures (October 2025), and data for plots]().
+The trained ML models and features can be found in [Wikidata Change Classification: ML models, features, transitive closures (October 2025), and data for plots](https://doi.org/10.5281/zenodo.22205544).
 
 The training dataset can be found at [Wikidata Labeled Changes (Manually and Rule-Based)](https://doi.org/10.5281/zenodo.22657989).
 
@@ -280,7 +280,7 @@ The shared samples labeled by 2 other extra annotators and compute of IAA can be
 # Analysis
 All analysis *.sql* scripts can be found in *wikidata-edit-history/analysis/sql*.
 
-- To replicate plots, download *data_for_plots.zip* from [Wikidata Change Classification ML models, features, transitive closures (October 2025), and data for plots]() and put the *data/* folder under *wikidata-edit-history/analysis/scripts*. Then run the script `python3 plots.py`, which generates plots in *wikidata-edit-history/analysis/scripts/results*
+- To replicate plots, download *data_for_plots.zip* from [Wikidata Change Classification: ML models, features, transitive closures (October 2025), and data for plots](https://doi.org/10.5281/zenodo.22205544) and put the *data/* folder under *wikidata-edit-history/analysis/scripts*. Then run the script `python3 plots.py`, which generates plots in *wikidata-edit-history/analysis/scripts/results*
 - All *.sql* queries ran for same data type UPDATEs analysis section can be found at *wikidata-edit-history/analysis/sql/using_change_types.sql*
 
 ---
@@ -298,7 +298,7 @@ All files needed for this step are in the folder `/wdtk` of this repository.
 
 We use the [Wikidata Toolkit](https://github.com/Wikidata-Toolkit/Wikidata-Toolkit) to extract additional data from a Wikidata JSON dump.
 
-We provide the extracted data in [Wikidata Change Classification ML models, features, transitive closures (October 2025), and data for plots](). To extract new data, follow the steps below.
+We provide the extracted data in [Wikidata Change Classification: ML models, features, transitive closures (October 2025), and data for plots](https://doi.org/10.5281/zenodo.22205544). To extract new data, follow the steps below.
 
 Three extraction classes are provided:
 
@@ -392,7 +392,7 @@ bash extract_extra_data.bash
 ---
 
 # Transitive Closure Cache Creation
-**NOTE:** We provide the transitive closure cache in *transitive_closures.zip* from [Wikidata Change Classification ML models, features, transitive closures (October 2025), and data for plots]().
+**NOTE:** We provide the transitive closure cache in *transitive_closures.zip* from [Wikidata Change Classification: ML models, features, transitive closures (October 2025), and data for plots](https://doi.org/10.5281/zenodo.22205544).
 
 The transitive closure cache is required for rule-based change classification. It loads the transitive closure CSV files produced by `ExtractTransitiveClosure.java` into memory and serializes them as a pickle file for fast access during feature computation.
 
