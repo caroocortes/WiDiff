@@ -6,18 +6,6 @@ This tool extracts changes (diff between revisions) of statement values, ranks, 
 
 For a description of the change extraction, refer to our paper [WiDiff: Change Extraction and Exploration in Wikidata](https://arxiv.org/abs/2609.08508).
 
-Citation:
-```
-@misc{WiDiff2026,
-    title={{WiDiff: Extracting Changes from Wikidata's Edit History}}, 
-    author={{Cortés, Carolina and Ehrlinger, Lisa and Etcheverry, Lorena and Naumann, Felix}},
-    year={2026},
-    eprint={2609.08508},
-    archivePrefix={arXiv},
-    primaryClass={cs.DB},
-    url={https://arxiv.org/abs/2609.08508}, 
-}
-```
 
 This README is structured as follows:
 - [Change extraction](#change-extraction): change extraction prerequisites and configuration parameters.
@@ -397,3 +385,15 @@ See *metrics.ipynb* in *wikidata-edit-history/logs* for run metrics of the chang
 
 *parser_log_files.csv* contains specs for the different filees in the dump.
 
+To cite this tool:
+```
+@misc{WiDiff2026,
+    title={{WiDiff: Extracting Changes from Wikidata's Edit History}}, 
+    author={{Cortés, Carolina and Ehrlinger, Lisa and Etcheverry, Lorena and Naumann, Felix}},
+    year={2026},
+    eprint={2609.08508},
+    archivePrefix={arXiv},
+    primaryClass={cs.DB},
+    url={https://arxiv.org/abs/2609.08508}, 
+}
+```
