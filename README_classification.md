@@ -25,7 +25,7 @@ Moreover, in this step we classify UPDATE edit events between values of the same
 
 In Step 3, we classify UPDATE edit events between values of type string-string and entity-entity into refinement, unrefinement, textual change, or value update, using an ML classifier.
 
-![classification framework](classification_framework.svg)
+![classification framework](diagrams/classification_framework.svg)
 
 Next, we present the definitions of the different change types.
 
