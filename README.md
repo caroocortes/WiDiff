@@ -385,6 +385,24 @@ See *metrics.ipynb* in *wikidata-edit-history/logs* for run metrics of the chang
 
 *parser_log_files.csv* contains specs for the different filees in the dump.
 
+
+## Plots
+
+To reproduce plots in the paper, download the following data from the *entity_stats* table:
+
+```
+select entity_id,entity_label,num_revisions,num_value_changes,first_revision_timestamp,last_revision_timestamp
+from entity_stats
+```
+
+and add the csv to *wikidata-edit-history/analysis/scripts/data/entity_stats.csv*
+
+Then, run the method *plot_revision_value_change_distribution_over_time* in *wikidata-edit-history/analysis/scripts/plots.py*
+
+**NOTE:** This plots can also be reproduced for the other partitions (scholarly articles (_sa), astronomical objects (_ao), less than 10 value changes (_less)) by downloading the corresponding entity_stats_sa, entity_stats_ao, entity_stats_less.
+
+## Citation
+
 To cite this tool:
 ```
 @misc{WiDiff2026,

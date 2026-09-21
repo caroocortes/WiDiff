@@ -5,6 +5,7 @@ from io import StringIO
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
+import numpy as np
 
 DATA_DIR = 'data'
 RESULTS_DIR = 'results'
@@ -389,6 +390,7 @@ def plot_change_type_per_datatype(df, out_path):
 # Plot 3: revision and value change distribution over time 
 # -----------------------------------------------------------------------
 def plot_revision_value_change_distribution_over_time():
+    # Entity stats csv has 1 row per entity with stats about its edit history (e.g., num revisions, num value changes, etc.)
     df = pd.read_csv(f'{DATA_DIR}/entity_stats.csv')
 
     print('Number of unique entities:', df['entity_id'].nunique())
@@ -397,7 +399,6 @@ def plot_revision_value_change_distribution_over_time():
     max_value_changes = df['num_value_changes'].max()
     print('Entity with highest number of revisions:', df[['entity_id', 'entity_label']][df['num_revisions'] == max_revisions], 'with', max_revisions, 'revisions')
     print('Entity with highest number of value changes:', df[['entity_id', 'entity_label']][df['num_value_changes'] == max_value_changes], 'with', max_value_changes, 'value changes')
-
 
     #  ------------ Distribution of revisions per entity ------------
     num_revisions = df['num_revisions']
@@ -409,40 +410,49 @@ def plot_revision_value_change_distribution_over_time():
     print(f'Median: {median_val:.2f}')
     print(f'Mode: {mode_val}')
 
-    # log-spaced bins, since revision counts are typically heavily right-skewed
+    # log-spaced bins
     min_val = max(num_revisions.min(), 1)  # avoid log(0)
     max_val = num_revisions.max()
     bins = np.logspace(np.log10(min_val), np.log10(max_val), 50)
 
+    # print(f'Min revisions: {min_val}, Max revisions: {max_val}, Bins: {len(bins)}')
+
+    # print('Number of entities with 10 revisions:', len(df[df['num_revisions'] == 10]['entity_id']))
+    # print('Number of entities with 100 revisions:', len(df[df['num_revisions'] == 100]['entity_id']))
+
     fig, ax = plt.subplots(figsize=(7, 5))
-    ax.hist(num_revisions, bins=bins, edgecolor='black', linewidth=0.5, color='#88CCEE', alpha=0.7)
+    counts, bin_edges, patches = ax.hist(num_revisions, bins=bins, edgecolor='black', linewidth=0.5, color='#88CCEE', alpha=0.7)
 
     ax.axvline(mean_val, color='#CC6677', linestyle='--', linewidth=1.5, label=f'Mean = {mean_val:.1f}')
     ax.axvline(median_val, color='#332288', linestyle='-.', linewidth=1.5, label=f'Median = {median_val:.1f}')
-    ax.axvline(mode_val, color='#DDCC77', linestyle=':', linewidth=1.5, label=f'Mode = {mode_val}')
+    ax.axvline(mode_val, color='#117733', linestyle=':', linewidth=1.5, label=f'Mode = {mode_val}')
+
+    # bin_idx = np.digitize(100, bins) - 1
+    # print(f"Bin range: [{bins[bin_idx]:.1f}, {bins[bin_idx+1]:.1f}]")
+    # print(f"Entities in this bin: {len(df[(df['num_revisions'] >= bins[bin_idx]) & (df['num_revisions'] < bins[bin_idx+1])])}")
 
     ax.set_xscale('log')
-    ax.set_yscale('log')  # entity counts per bucket are also likely to be skewed
-    ax.set_xlabel('Number of revisions per entity (log scale)')
-    ax.set_ylabel('Number of entities (log scale)')
-    ax.legend()
+    ax.set_yscale('log') 
+    ax.set_xlabel('Number of revisions per entity (log scale)', fontsize=12)
+    ax.set_ylabel('Number of entities (log scale)', fontsize=12)
+    ax.legend(fontsize=12)
 
     plt.tight_layout()
-    plt.savefig(f'{FIGURES_DIR}/revisions_per_entity_histogram.png', dpi=300, bbox_inches='tight')
+    plt.savefig(f'{FIGURES_DIR}/revisions_per_entity_histogram.png', dpi=600, bbox_inches='tight')
     plt.show()
 
     #  ------------- Distribution of value changes per entity -------------
     num_val_changes = df['num_value_changes']
     mean_val = num_val_changes.mean()
     median_val = num_val_changes.median()
-    mode_val = num_val_changes.mode().iloc[0]  # .mode() can return multiple values if tied; take the first
+    mode_val = num_val_changes.mode().iloc[0]
 
     print(f'Mean: {mean_val:.2f}')
     print(f'Median: {median_val:.2f}')
     print(f'Mode: {mode_val}')
 
-    # log-spaced bins, since revision counts are typically heavily right-skewed
-    min_val = max(num_val_changes.min(), 1)  # avoid log(0)
+    # log-spaced bins
+    min_val = max(num_val_changes.min(), 1) 
     max_val = num_val_changes.max()
     bins = np.logspace(np.log10(min_val), np.log10(max_val), 50)
 
@@ -451,16 +461,16 @@ def plot_revision_value_change_distribution_over_time():
 
     ax.axvline(mean_val, color='#CC6677', linestyle='--', linewidth=1.5, label=f'Mean = {mean_val:.1f}')
     ax.axvline(median_val, color='#332288', linestyle='-.', linewidth=1.5, label=f'Median = {median_val:.1f}')
-    ax.axvline(mode_val, color='#DDCC77', linestyle=':', linewidth=1.5, label=f'Mode = {mode_val}')
+    ax.axvline(mode_val, color='#117733', linestyle=':', linewidth=1.5, label=f'Mode = {mode_val}')
 
     ax.set_xscale('log')
-    ax.set_yscale('log')  # entity counts per bucket are also likely to be skewed
-    ax.set_xlabel('Number of value changes per entity (log scale)')
-    ax.set_ylabel('Number of entities (log scale)')
-    ax.legend()
+    ax.set_yscale('log') 
+    ax.set_xlabel('Number of value changes per entity (log scale)', fontsize=12)
+    ax.set_ylabel('Number of entities (log scale)', fontsize=12)
+    ax.legend(fontsize=12)
 
     plt.tight_layout()
-    plt.savefig(f'{FIGURES_DIR}/val_changes_per_entity_histogram.png', dpi=300, bbox_inches='tight')
+    plt.savefig(f'{FIGURES_DIR}/val_changes_per_entity_histogram.png', dpi=600, bbox_inches='tight')
     plt.show()
 
 def main():
@@ -469,6 +479,8 @@ def main():
 
     per_datatype_df = load_change_type_per_datatype()
     plot_change_type_per_datatype(per_datatype_df, f'{FIGURES_DIR}/distribution_change_types_per_datatype.png')
+
+    plot_revision_value_change_distribution_over_time()
 
 
 if __name__ == '__main__':
