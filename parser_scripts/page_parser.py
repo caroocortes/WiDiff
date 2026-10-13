@@ -1915,9 +1915,10 @@ class PageParser():
         self.entity_stats['entity_description'] = self.entity_data['description'] if self.entity_data['description'] else ''
         
         str_list = ', '.join(list_of_types_31)
+        self.entity_stats['entity_types_31'] = str_list
+
         list_of_types_279 = list(set([type_id for val_id, type_id in self.entity_data['p279_types']]))
         str_list = ', '.join(list_of_types_279)
-        self.entity_stats['entity_types_31'] = str_list
         self.entity_stats['entity_types_279'] = str_list
         
         self.entity_stats['first_revision_timestamp'] = self.revision[0][3] if len(self.revision) > 0 else None # timestamp is at position 3 in the tuple
